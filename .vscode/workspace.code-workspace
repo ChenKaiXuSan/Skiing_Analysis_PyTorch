@@ -1,8 +1,12 @@
 {
 	"folders": [
 		{
-			"name": "skeleton",
-			"path": "/workspace/project"
+			"name": "skiing",
+			"path": "/workspace/code/Skiing_Analysis_PyTorch"
 		},
+		{
+			"name": "dataset",
+			"path": "/workspace/dataset"
+		}
 	]
 }
