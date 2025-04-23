@@ -5,6 +5,14 @@
       "type": "debugpy",
       "request": "launch",
       "module": "enter-your-module-name"
-    }
+    },
+    {
+      "name": "prepare_dataset",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "console": "prepare_dataset.main"
+    },
   ]
 }
