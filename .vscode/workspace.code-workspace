@@ -2,11 +2,11 @@
 	"folders": [
 		{
 			"name": "skiing",
-			"path": "/workspace/code/Skiing_Analysis_PyTorch"
+			"path": "/workspace/code/"
 		},
 		{
 			"name": "dataset",
-			"path": "/workspace/dataset"
+			"path": "/workspace/data"
 		}
 	]
 }
