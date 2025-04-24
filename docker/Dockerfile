@@ -1,6 +1,6 @@
 # docker image（PyTorch + CUDA + Python）
-ARG PYTORCH="2.2.1"
-ARG CUDA="12.6"
+ARG PYTORCH="2.5.1"
+ARG CUDA="12.1"
 ARG CUDNN="8"
 FROM pytorch/pytorch:${PYTORCH}-cuda${CUDA}-cudnn${CUDNN}-devel
 
