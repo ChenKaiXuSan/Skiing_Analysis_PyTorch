@@ -237,7 +237,7 @@ class MultiPreprocess(torch.nn.Module):
 
         return list(batch_Dict.values()), filter_batch
 
-    def process_batch(self, batch: torch.Tensor, labels: list):
+    def process_batch(self, batch: torch.Tensor):
         b, c, t, h, w = batch.shape
 
         # for one batch prepare.
@@ -310,33 +310,30 @@ class MultiPreprocess(torch.nn.Module):
         return (
             filter_batch,  # b, c, t, h, w
             one_bbox_none_index,  # list
-            labels,  # b
             torch.stack(pred_bbox_list, dim=0),  # b, t, h, w
             torch.stack(pred_mask_list, dim=0),  # b, c, t, h, w
             torch.stack(pred_keypoint_list, dim=0),  # b, t, keypoint, value
             torch.stack(pred_keypoint_score_list, dim=0),  # b, t, keypoint, value
         )
 
-    def forward(self, batch, labels):
+    def forward(self, batch):
 
         b, c, t, h, w = batch.shape
         # batch, (b, c, t, h, w)
         # bbox_none_index, (b, t)
-        # label, (b)
         # bbox, (b, t, 4) (cxcywh)
         # mask, (b, 1, t, h, w)
         # keypoint, (b, t, 17, 2)
         # keypoint score, (b, t, 17, 1)
-        video, bbox_none_index, labels, bbox, mask, keypoint, keypoint_score = (
-            self.process_batch(batch, labels)
+        video, bbox_none_index, bbox, mask, keypoint, keypoint_score = (
+            self.process_batch(batch)
         )
 
         # shape check
         assert video.shape == batch.shape
-        assert labels.shape[0] == b
         assert bbox.shape[0] == b and bbox.shape[1] == t
         assert mask.shape[2] == t and mask.shape[0] == b
         assert keypoint.shape[0] == b and keypoint.shape[1] == t
         assert keypoint_score.shape[0] == b and keypoint_score.shape[1] == t
 
-        return video, bbox_none_index, labels, bbox, mask, keypoint, keypoint_score
+        return video, bbox_none_index, bbox, mask, keypoint, keypoint_score

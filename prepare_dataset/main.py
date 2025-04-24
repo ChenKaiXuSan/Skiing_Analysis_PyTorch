@@ -22,7 +22,6 @@ Date      	By	Comments
 
 from __future__ import annotations
 
-import torch
 import json
 from pathlib import Path
 from torchvision.io import read_video
@@ -39,9 +38,6 @@ import hydra
 from project.utils import del_folder, make_folder
 from prepare_dataset.preprocess import Preprocess
 
-RAW_CLASS = ["ASD", "DHS", "LCS", "HipOA"]
-CLASS = ["ASD", "DHS", "LCS_HipOA", "Normal"]
-map_CLASS = {"ASD": 0, "DHS": 1, "LCS_HipOA": 2, "Normal": 3}  # map the class to int
 
 def process(parames, person: str):
 
@@ -56,18 +52,13 @@ def process(parames, person: str):
     # prepare the preprocess
     preprocess = Preprocess(parames)
 
-    # * step1: load the video path, with the sorted order
-    
-    # k is disease, v is (video_path, info)
-    for video in RAW_PATH.iterdir():
+    res = dict()
 
-        logger.info(f"Start process the video {video.name}!")
+    one_person = RAW_PATH / person
 
-        # * step2: load the video from vieo path
-        # get the bbox
-        vframes, audio, _ = read_video(
-            video, pts_unit="sec", output_format="TCHW"
-        )
+    for one_video in one_person.iterdir():
+
+        vframes, audio, _ = read_video(one_video, pts_unit="sec", output_format="TCHW")
 
         # * step3: use preprocess to get information.
         # the format is: final_frames, bbox_none_index, label, optical_flow, bbox, mask, pose
@@ -76,63 +67,49 @@ def process(parames, person: str):
         (
             frames,
             bbox_none_index,
-            label,
             optical_flow,
             bbox,
             mask,
             keypoints,
             keypoints_score,
-        ) = preprocess(m_vframes, label, 0)
+        ) = preprocess(m_vframes, 0)
 
         # * step4: save the video frames keypoint
         anno = dict()
 
-        # * when use mmaction, we need convert the keypoint torch to numpy
+        # * packe the keypoint and keypoint_score
         anno["keypoint"] = keypoints.cpu().numpy()
         anno["keypoint_score"] = keypoints_score.cpu().numpy()
-        anno["frame_dir"] = video_path
-        anno["img_shape"] = (vframes.shape[2], vframes.shape[3])
-        anno["original_shape"] = (vframes.shape[2], vframes.shape[3])
-        anno["total_frames"] = keypoints.shape[1]
-        anno["label"] = int(label)
 
-        res[info["flag"]].append(anno)
+        # * packe the bbox and mask
+        sample_json_info = {
+            "video_name": one_video.name,
+            "video_path": one_video,
+            "img_shape": (vframes.shape[2], vframes.shape[3]),
+            "frame_count": vframes.shape[0],
+            "none_index": bbox_none_index,
+            "bbox": [bbox[0, i].tolist() for i in range(bbox.shape[1])],
+            "mask": mask,
+            "keypoint": anno,
+        }
 
-        # break;
+        res[one_video.name] = sample_json_info
 
-    # save one disease to pkl file.
+    # * step5: save the video frames to json file
     SAVE_PATH.mkdir(parents=True, exist_ok=True)
 
-    with open(SAVE_PATH / f'{"_".join(disease)}.pkl', "wb") as file:
-        pickle.dump(res, file)
-
-    logging.info(f"Save the {fold} {disease} to {SAVE_PATH}")
+    save_to_json(res, SAVE_PATH, logger)  # save the sample info to json file.
 
 
-def save_to_json(sample_info, save_path, logger, method: str) -> None:
+def save_to_json(sample_info, save_path, logger) -> None:
     """save the sample info to json file.
 
-    There have three method to get the gait cycle index, include mix, pose, bbox.
-
-    The sample info include:
-
-    video_name: the video name,
-    video_path: the video path, relative path from /workspace/skeleton/data/segmentation_dataset_512
-    frame_count: the raw frames of the video,
-    label: the label of the video,
-    disease: the disease of the video,
-    gait_cycle_index: the gait cycle index,
-    bbox_none_index: the bbox none index, when use yolo to get the bbox, some frame will not get the bbox.
-    bbox: the bbox, [n, 4] (cxcywh)
-
     Args:
-        sample_info (dict): the sample info dict.
-        save_path (str): the prefix save path, like /workspace/skeleton/data/segmentation_dataset_512
-        logger (Logger): for multiprocessing logging.
-        method (str): the method to get the gait cycle index, include mix, pose, bbox.
+        sample_info (dict): _description_
+        save_path (Path): _description_
+        logger (logging): _description_
     """
-
-    save_path = Path(save_path, "json_" + method)
+    save_path = Path(save_path, "json_file")
 
     save_path_with_name = (
         save_path / sample_info["disease"] / (sample_info["video_name"] + ".json")

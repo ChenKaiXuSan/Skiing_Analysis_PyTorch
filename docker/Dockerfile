@@ -27,23 +27,10 @@ WORKDIR /workspace
 # RUN useradd -m model-server \
 #     && mkdir -p /home/model-server/tmp
 
-# 安装Python库（你可以根据自己项目修改）
-RUN pip install --upgrade pip && \
-    pip install \
-    numpy \
-    scipy \
-    pandas \
-    matplotlib \
-    opencv-python \
-    jupyter \
-    notebook \
-    torchvision \
-    torchaudio \
-    tqdm \
-    scikit-learn \
-    seaborn
-
 RUN pip install --no-cache-dir --upgrade pip
+
+COPY requirements.txt /workspace/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 7. 默认命令
 CMD ["bash"]
