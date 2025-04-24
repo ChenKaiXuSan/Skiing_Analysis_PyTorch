@@ -29,8 +29,19 @@ WORKDIR /workspace
 
 RUN pip install --no-cache-dir --upgrade pip
 
-COPY requirements.txt /workspace/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir \
+    pytorch-lightning \
+    torch \
+    torchvision \
+    ultralytics \
+    hydra-core \
+    scikit-learn \
+    imblearn \
+    grad-cam \
+    captum \
+    tensorboard \
+    rich \
+    av \
 
 # 7. 默认命令
 CMD ["bash"]
