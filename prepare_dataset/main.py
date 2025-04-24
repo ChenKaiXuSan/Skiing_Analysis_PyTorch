@@ -115,6 +115,7 @@ def save_to_json(sample_info, save_path, logger) -> None:
         save_path (Path): _description_
         logger (logging): _description_
     """
+    # TODO: 这个需要修改一下，符合格式
     save_path = Path(save_path, "json_file")
 
     save_path_with_name = (
