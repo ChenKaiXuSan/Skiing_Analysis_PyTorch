@@ -1,21 +1,22 @@
 # hydra config
 hydra:
   run:
-    dir: /workspace/code/Skiing_Analysis_PyTorch/logs/prepare_dataset/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: /workspace/code/logs/prepare_dataset/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 YOLO:
-  pose_ckpt: "/workspace/code/Skiing_Analysis_PyTorch/ckpt/yolo11x-pose.pt"
-  seg_ckpt: "/workspace/code/Skiing_Analysis_PyTorch/ckpt/yolo11x-seg.pt"
-  bbox_ckpt: "/workspace/code/Skiing_Analysis_PyTorch/ckpt/yolo11x.pt"
+  pose_ckpt: "/workspace/code/ckpt/yolo11x-pose.pt"
+  seg_ckpt: "/workspace/code/ckpt/yolo11x-seg.pt"
+  bbox_ckpt: "/workspace/code/ckpt/yolo11x.pt"
   conf: 0.8
   iou: 0.5
   verbose: False
-  device: 0
+  device: 1
+  img_size: 640
 
 # Path
 # use YOLOv11 detection with tracking.
 extract_dataset:
-  data_path: "/workspace/dataset/raw" # this is raw data path.
-  save_path: "/workspace/dataset/json" # this is extracted video path.
+  data_path: "/workspace/data/raw" # this is raw data path.
+  save_path: "/workspace/data/json" # this is extracted video path.
 
 OF: False

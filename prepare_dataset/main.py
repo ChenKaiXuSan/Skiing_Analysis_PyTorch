@@ -22,6 +22,12 @@ Date      	By	Comments
 
 from __future__ import annotations
 
+
+
+import os
+
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
 import json
 from pathlib import Path
 from torchvision.io import read_video
@@ -131,7 +137,7 @@ def main(parames):
     """
 
     # ! only for test
-    process(parames, "run_1")
+    process(parames, "run_2")
 
     # threads = []
     # for d in [["ASD"], ["LCS", "HipOA"]]:

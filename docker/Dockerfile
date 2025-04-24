@@ -1,8 +1,5 @@
 # docker image（PyTorch + CUDA + Python）
-ARG PYTORCH="2.3.1"
-ARG CUDA="12.1"
-ARG CUDNN="8"
-FROM pytorch/pytorch:${PYTORCH}-cuda${CUDA}-cudnn${CUDNN}-devel
+FROM pytorch/pytorch:latest
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED TRUE
@@ -17,8 +14,6 @@ RUN apt-get update && \
     ffmpeg libsm6 libxext6 git ninja-build libglib2.0-0 libsm6 libxrender-dev libxext6 \
     libsndfile1 libturbojpeg \
     && rm -rf /var/lib/apt/lists/*
-
-RUN export FORCE_CUDA=1
 
 WORKDIR /workspace
 
@@ -40,5 +35,5 @@ RUN pip install --no-cache-dir \
     grad-cam \
     captum \
     tensorboard \
-    rich \
+    rich \ 
     av \

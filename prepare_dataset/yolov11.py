@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-'''
+"""
 File: /workspace/code/Skiing_Analysis_PyTorch/preprocess/yolov8.py
 Project: /workspace/code/Skiing_Analysis_PyTorch/preprocess
 Created Date: Wednesday April 23rd 2025
@@ -10,7 +10,7 @@ Comment:
 
 Have a good code time :)
 -----
-Last Modified: Wednesday April 23rd 2025 12:26:20 pm
+Last Modified: Thursday April 24th 2025 4:30:44 pm
 Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
 -----
 Copyright (c) 2025 The University of Tsukuba
@@ -18,11 +18,14 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
-'''
+"""
 
 import torch
+import torchvision
+
 import logging
 import numpy as np
+import torchvision.transforms.functional
 from ultralytics import YOLO
 
 
@@ -39,6 +42,8 @@ class MultiPreprocess(torch.nn.Module):
         self.iou = configs.iou
         self.verbose = configs.verbose
         self.device = configs.device
+
+        self.img_size = configs.img_size
 
     def get_YOLO_pose_result(self, frame_batch: np.ndarray):
         """
@@ -258,6 +263,10 @@ class MultiPreprocess(torch.nn.Module):
                 .to(torch.uint8)
                 .numpy()
             )
+
+            # one_batch_numpy = np.resize(
+            #     one_batch_numpy, (t, h, w, c)
+            # )  # (t, h, w, c) > (t, h, w, c)
 
             # check shape and dtype in numpy
             assert one_batch_numpy.shape == (t, h, w, c)
