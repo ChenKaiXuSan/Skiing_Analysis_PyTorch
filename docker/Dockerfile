@@ -28,7 +28,7 @@ RUN pip install --no-cache-dir \
     pytorch-lightning \
     torch \
     torchvision \
-    ultralytics \
+    ultralytics==8.3.113 \
     hydra-core \
     scikit-learn \
     imblearn \
