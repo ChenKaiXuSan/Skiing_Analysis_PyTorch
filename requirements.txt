@@ -3,7 +3,7 @@ torch
 torchvision
 
 # yolo api
-ultralytics
+ultralytics==8.3.113
 
 # config hydra 
 hydra-core
