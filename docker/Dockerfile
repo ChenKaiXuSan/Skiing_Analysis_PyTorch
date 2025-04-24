@@ -42,6 +42,3 @@ RUN pip install --no-cache-dir \
     tensorboard \
     rich \
     av \
-
-# 7. 默认命令
-CMD ["bash"]
