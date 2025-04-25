@@ -2,6 +2,8 @@
 hydra:
   run:
     dir: /workspace/code/logs/prepare_dataset/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: false
 
 YOLO:
   pose_ckpt: "/workspace/code/ckpt/yolo11x-pose.pt"
@@ -17,6 +19,6 @@ YOLO:
 # use YOLOv11 detection with tracking.
 extract_dataset:
   data_path: "/workspace/data/raw" # this is raw data path.
-  save_path: "/workspace/data/json" # this is extracted video path.
+  save_path: "/workspace/data/" # this is extracted video path.
 
 OF: false
