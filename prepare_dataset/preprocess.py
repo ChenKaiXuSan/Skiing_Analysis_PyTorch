@@ -63,27 +63,29 @@ class OpticalFlow(nn.Module):
             self.device
         )  # c, f, h, w to f, c, h, w
 
+        # prepare the img
         current_frame = frame_batch[:-1, :, :, :]  # 0~-1 frame
         next_frame = frame_batch[1:, :, :, :]  # 1~last frame
-
-        # transforms
-        current_frame_batch, next_frame_batch = self.transforms(
-            current_frame, next_frame
-        )
 
         # start predict
         self.model.eval()
         pred_flows = []
 
         interval = (
-            30  # the interval for the OF model predict, because the model is too large.
+            10  # the interval for the OF model predict, because the model is too large.
         )
 
         with torch.no_grad():
             for i in range(0, f, interval):
+                
+                # todo: maybe under scalse the img size.
+                # transforms
+                current_frame_batch, next_frame_batch = self.transforms(
+                    current_frame[i : i + interval], next_frame[i : i + interval]
+                )
                 temp_pred_flows = self.model(
-                    current_frame_batch[i : i + interval],
-                    next_frame_batch[i : i + interval],
+                    current_frame_batch,
+                    next_frame_batch,
                 )[-1]
                 pred_flows.append(temp_pred_flows)
 

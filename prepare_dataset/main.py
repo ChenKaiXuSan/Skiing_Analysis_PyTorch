@@ -23,37 +23,26 @@ Date      	By	Comments
 from __future__ import annotations
 
 
-
-import os
-
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
 import json
+import logging
 from pathlib import Path
+import hydra
+
 from torchvision.io import read_video
 
-import multiprocessing
-import logging
+from project.utils import del_folder, make_folder
+from prepare_dataset.preprocess import Preprocess
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-import hydra
-
-from project.utils import del_folder, make_folder
-from prepare_dataset.preprocess import Preprocess
-
 
 def process(parames, person: str):
-
     RAW_PATH = Path(parames.extract_dataset.data_path)
     SAVE_PATH = Path(parames.extract_dataset.save_path)
 
-    # prepare the log file
-    logger = logging.getLogger(f"Logger-{multiprocessing.current_process().name}")
-
-    logger.info(f"Start process the {person} video!")
+    logging.info(f"Start process the {person} video")
 
     # prepare the preprocess
     preprocess = Preprocess(parames)
@@ -63,7 +52,6 @@ def process(parames, person: str):
     one_person = RAW_PATH / person
 
     for one_video in one_person.iterdir():
-
         vframes, audio, _ = read_video(one_video, pts_unit="sec", output_format="TCHW")
 
         # * step3: use preprocess to get information.
@@ -81,22 +69,21 @@ def process(parames, person: str):
         ) = preprocess(m_vframes, 0)
 
         # * step4: save the video frames keypoint
-        anno = dict()
-
-        # * packe the keypoint and keypoint_score
-        anno["keypoint"] = keypoints.cpu().numpy()
-        anno["keypoint_score"] = keypoints_score.cpu().numpy()
 
         # * packe the bbox and mask
         sample_json_info = {
             "video_name": one_video.name,
-            "video_path": one_video,
+            "video_path": str(one_video),
             "img_shape": (vframes.shape[2], vframes.shape[3]),
             "frame_count": vframes.shape[0],
             "none_index": bbox_none_index,
-            "bbox": [bbox[0, i].tolist() for i in range(bbox.shape[1])],
-            "mask": mask,
-            "keypoint": anno,
+            "bbox": bbox.tolist(),  # serialized as list
+            "mask": mask.tolist(),
+            # "optical_flow": optical_flow.tolist(),
+            "keypoint": {
+                "keypoint": keypoints.tolist(),
+                "keypoint_score": keypoints_score.tolist(),
+            },
         }
 
         res[one_video.name] = sample_json_info
@@ -104,10 +91,10 @@ def process(parames, person: str):
     # * step5: save the video frames to json file
     SAVE_PATH.mkdir(parents=True, exist_ok=True)
 
-    save_to_json(res, SAVE_PATH, logger)  # save the sample info to json file.
+    save_to_json(res, SAVE_PATH, person)  # save the sample info to json file.
 
 
-def save_to_json(sample_info, save_path, logger) -> None:
+def save_to_json(sample_info: dict, save_path: Path, person: str) -> None:
     """save the sample info to json file.
 
     Args:
@@ -115,17 +102,18 @@ def save_to_json(sample_info, save_path, logger) -> None:
         save_path (Path): _description_
         logger (logging): _description_
     """
-    # TODO: 这个需要修改一下，符合格式
-    save_path = Path(save_path, "json_file")
 
-    save_path_with_name = (
-        save_path / sample_info["disease"] / (sample_info["video_name"] + ".json")
-    )
+    for k, v in sample_info.items():
+        save_path_with_name = save_path / person / (k.split(".")[0] + ".json")
 
-    make_folder(save_path_with_name.parent)
-    with open(save_path_with_name, "w") as f:
-        json.dump(sample_info, f, indent=4)
-    logger.info(f"Save the {sample_info['video_name']} to {save_path}")
+        make_folder(save_path_with_name.parent)
+
+        # convert Path to str.
+
+        with open(save_path_with_name, "w") as f:
+            json.dump(sample_info, f, indent=4)
+
+        logging.info(f"Save the {sample_info['video_name']} to {save_path_with_name}")
 
 
 @hydra.main(config_path="../configs/", config_name="prepare_dataset")
@@ -137,24 +125,9 @@ def main(parames):
         parames (hydra): hydra config.
     """
 
-    # ! only for test
-    process(parames, "run_2")
-
-    # threads = []
-    # for d in [["ASD"], ["LCS", "HipOA"]]:
-
-    #     thread = multiprocessing.Process(target=process, args=(parames, "fold0", d))
-    #     threads.append(thread)
-
-    # for t in threads:
-    #     t.start()
-
-    # for t in threads:
-    #     t.join()
-
-    # process(parames, "fold0", ["DHS"])
+    for i in range(1, 7):
+        process(parames, "run_{}".format(i))
 
 
 if __name__ == "__main__":
-    # torch.multiprocessing.set_start_method('spawn')# good solution !!!!
     main()

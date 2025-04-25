@@ -19,4 +19,4 @@ extract_dataset:
   data_path: "/workspace/data/raw" # this is raw data path.
   save_path: "/workspace/data/json" # this is extracted video path.
 
-OF: False
+OF: false
