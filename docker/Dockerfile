@@ -10,7 +10,6 @@ RUN apt-get update && \
     ca-certificates \
     g++ \
     openjdk-11-jre-headless \
-    # MMDET Requirements
     ffmpeg libsm6 libxext6 git ninja-build libglib2.0-0 libsm6 libxrender-dev libxext6 \
     libsndfile1 libturbojpeg \
     && rm -rf /var/lib/apt/lists/*
