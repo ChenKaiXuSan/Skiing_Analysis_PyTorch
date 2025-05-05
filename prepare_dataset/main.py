@@ -45,14 +45,16 @@ def process(parames, person: str):
 
     logging.info(f"Start process the {person} video")
 
-    # prepare the preprocess
-    preprocess = Preprocess(parames)
-
     res = {}
 
     one_person = RAW_PATH / person
 
+
     for one_video in one_person.iterdir():
+
+        # prepare the preprocess
+        preprocess = Preprocess(parames, one_video)
+
         vframes, _, _ = read_video(one_video, pts_unit="sec", output_format="TCHW")
 
         # * step3: use preprocess to get information.

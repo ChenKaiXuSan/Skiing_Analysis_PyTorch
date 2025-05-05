@@ -36,3 +36,4 @@ RUN pip install --no-cache-dir \
     tensorboard \
     rich \ 
     av \
+    nvitop \

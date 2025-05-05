@@ -14,6 +14,7 @@ YOLO:
   verbose: False
   device: 1
   img_size: 640
+  save_path: "/workspace/data/vis"
 
 # Path
 # use YOLOv11 detection with tracking.

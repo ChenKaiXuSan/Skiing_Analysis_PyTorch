@@ -23,14 +23,15 @@ Date      	By	Comments
 import torch
 import torchvision
 
+import os
+
 import logging
 import numpy as np
-import torchvision.transforms.functional
 from ultralytics import YOLO
 
 
 class MultiPreprocess(torch.nn.Module):
-    def __init__(self, configs) -> None:
+    def __init__(self, configs, video_path) -> None:
         super().__init__()
 
         # load model
@@ -44,6 +45,8 @@ class MultiPreprocess(torch.nn.Module):
         self.device = configs.device
 
         self.img_size = configs.img_size
+        self.save_path = configs.save_path
+        self.video_name = "/".join(video_path.parts[-2:]).split(".")[0]
 
     def get_YOLO_pose_result(self, frame_batch: np.ndarray):
         """
@@ -66,7 +69,7 @@ class MultiPreprocess(torch.nn.Module):
             for frame in range(t):
 
                 results = self.yolo_pose(
-                    source=frame_batch[frame],
+                    source=np.ascontiguousarray(frame_batch[frame]),
                     conf=self.conf,
                     iou=self.iou,
                     save_crop=False,
@@ -87,6 +90,17 @@ class MultiPreprocess(torch.nn.Module):
                     else:
                         one_batch_keypoint[frame] = r.keypoints.xyn  # 1, 17
                         one_batch_keypoint_score[frame] = r.keypoints.conf  # 1, 17
+
+                    # save res to img
+                    _path = self.save_path + "/" + self.video_name
+
+                    if not os.path.exists(_path):
+                        os.makedirs(_path)
+
+                    torchvision.io.write_png(
+                        torch.tensor(r.plot()).permute(2, 0, 1),
+                        os.path.join(_path, f"{frame}_keypoint.png"),
+                    )
 
         return one_batch_keypoint, none_index, one_batch_keypoint_score
 

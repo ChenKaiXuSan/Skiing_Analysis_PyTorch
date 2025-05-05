@@ -121,10 +121,10 @@ class OpticalFlow(nn.Module):
 
 
 class Preprocess(nn.Module):
-    def __init__(self, config) -> None:
+    def __init__(self, config, video_path: Path) -> None:
         super(Preprocess, self).__init__()
 
-        self.yolo_model = MultiPreprocess(config.YOLO)
+        self.yolo_model = MultiPreprocess(config.YOLO, video_path)
 
         # ! notice: the OF method have err, the reason do not know.
         if config.OF:
