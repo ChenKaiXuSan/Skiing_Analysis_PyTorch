@@ -14,5 +14,13 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
     },
+    {
+      "name": "convert_frame_video",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "analysis.convert_img_video",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+    }
   ]
 }
