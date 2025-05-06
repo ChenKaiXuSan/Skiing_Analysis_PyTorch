@@ -52,7 +52,7 @@ if __name__ == "__main__":
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out = cv2.VideoWriter(str(output_path / one_video.name) + '.mp4', fourcc, 30.0, (width, height))
             
-            for f in tqdm(frames):
+            for f in tqdm(frames, desc=f"Processing {one_video.name}", total=len(frames)):
                 img = cv2.imread(str(f))
                 out.write(img)
 
