@@ -16,6 +16,11 @@ YOLO:
   img_size: 640
   save_path: "/workspace/data/vis"
 
+depth_estimator:
+  model: Intel/dpt-large
+  device: 1
+  save_path: "/workspace/data/depth"
+
 # Path
 # use YOLOv11 detection with tracking.
 extract_dataset:

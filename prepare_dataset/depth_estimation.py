@@ -24,65 +24,76 @@ from transformers import DPTImageProcessor, DPTForDepthEstimation
 import torch
 import numpy as np
 from PIL import Image
-import requests
-
-url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-image = Image.open(requests.get(url, stream=True).raw)
-
 
 
 class DepthEstimator:
-    def __init__(self, model_name="Intel/dpt-large"):
+    def __init__(self, configs):
+
+        model_name = configs.model
+        self.device = configs.device
 
         self.processor = DPTImageProcessor.from_pretrained(model_name)
-        self.model = DPTForDepthEstimation.from_pretrained(model_name)
+        self.model = DPTForDepthEstimation.from_pretrained(model_name).to(configs.device)
 
-    def estimate_depth(self, image):
-        # prepare image for the model
-        inputs = self.processor(images=image, return_tensors="pt")
+    def estimate_depth(self, frame_batch: np.ndarray):
+        
+        t, h, w, c = frame_batch.shape
 
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            predicted_depth = outputs.predicted_depth
+        one_batch_depth = [] 
 
-        # interpolate to original size
-        prediction = torch.nn.functional.interpolate(
-            predicted_depth.unsqueeze(1),
-            size=image.size[::-1],
-            mode="bicubic",
-            align_corners=False,
-        )
+        for frame in frame_batch:
+            
+            # prepare image for the model
+            inputs = self.processor(images=frame, return_tensors="pt").to(self.device)
 
-        # visualize the prediction
-        output = prediction.squeeze().cpu().numpy()
-        formatted = (output * 255 / np.max(output)).astype("uint8")
-        depth = Image.fromarray(formatted)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                predicted_depth = outputs.predicted_depth
+
+            # interpolate to original size
+            prediction = torch.nn.functional.interpolate(
+                predicted_depth.unsqueeze(1),
+                size=(h, w),
+                mode="bicubic",
+                align_corners=False,
+            )
+
+            one_batch_depth.append(prediction) # t, d, h, w
+
+            # visualize the prediction
+            output = prediction.squeeze().cpu().numpy()
+            formatted = (output * 255 / np.max(output)).astype("uint8")
+            depth = Image.fromarray(formatted)
+
         return depth
 
-    def __call__(self, image):
-        return self.estimate_depth(image)
+    def process_batch(self, batch: torch.Tensor):
+
+        # batch is a tensor of shape (b, c, t, h, w)
+        b, c, t, h, w = batch.shape
+
+        for batch_idx in range(b):
+            
+            # c, t, h, w > t, h, w, c
+            one_batch_numpy = (
+                batch[batch_idx, [2, 1, 0], ...]
+                .permute(1, 2, 3, 0)
+                .to(torch.uint8)
+                .numpy()
+            )
+            
+            assert one_batch_numpy.shape == (t, h, w, c)
+            assert one_batch_numpy.dtype == np.uint8
+
+            # estimate depth for each image
+            depths = self.estimate_depth(one_batch_numpy)
+
+        return depths
     
+    def __call__(self, batch: torch.Tensor):
 
+        b, c, t, h, w = batch.shape
 
-processor = DPTImageProcessor.from_pretrained("Intel/dpt-large")
-model = DPTForDepthEstimation.from_pretrained("Intel/dpt-large")
+        depth = self.process_batch(batch)
 
-# prepare image for the model
-inputs = processor(images=image, return_tensors="pt")
-
-with torch.no_grad():
-    outputs = model(**inputs)
-    predicted_depth = outputs.predicted_depth
-
-# interpolate to original size
-prediction = torch.nn.functional.interpolate(
-    predicted_depth.unsqueeze(1),
-    size=image.size[::-1],
-    mode="bicubic",
-    align_corners=False,
-)
-
-# visualize the prediction
-output = prediction.squeeze().cpu().numpy()
-formatted = (output * 255 / np.max(output)).astype("uint8")
-depth = Image.fromarray(formatted)
+        return depth

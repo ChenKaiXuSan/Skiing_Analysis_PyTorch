@@ -33,6 +33,7 @@ from torchvision.utils import flow_to_image
 from torchvision.models.optical_flow import Raft_Large_Weights, raft_large, raft_small
 
 from prepare_dataset.yolov11 import MultiPreprocess
+from prepare_dataset.depth_estimation import DepthEstimator
 
 
 class OpticalFlow(nn.Module):
@@ -125,6 +126,8 @@ class Preprocess(nn.Module):
         super(Preprocess, self).__init__()
 
         self.yolo_model = MultiPreprocess(config.YOLO, video_path)
+
+        self.depth_estimator = DepthEstimator(config.depth_estimator)
 
         # ! notice: the OF method have err, the reason do not know.
         if config.OF:
@@ -219,6 +222,9 @@ class Preprocess(nn.Module):
 
         b, c, t, h, w = batch.shape
 
+        # process depth
+        depth = self.depth_estimator(batch)
+        
         # process mask, pose
         video, bbox_none_index, bbox, mask, pose, pose_score = self.yolo_model(batch)
 
@@ -228,6 +234,7 @@ class Preprocess(nn.Module):
             optical_flow = self.of_model.process_batch(batch)
         else:
             optical_flow = None
+
 
         # shape check
         self.shape_check([video, mask, bbox, pose, optical_flow])

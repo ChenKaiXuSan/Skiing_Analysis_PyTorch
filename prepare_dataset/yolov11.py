@@ -270,7 +270,7 @@ class MultiPreprocess(torch.nn.Module):
 
             # ! now, the ultralytics support torch.tensor type, but here have some strange problem. So had better use numpy type.
             # ! np.ndarray type, HWC format with BGR channels uint8 (0-255).
-            # c, h, w > h, w, c, RGB > BGR
+            # c, t, h, w > t, h, w, c, RGB > BGR
             one_batch_numpy = (
                 batch[batch_index, [2, 1, 0], ...]
                 .permute(1, 2, 3, 0)
