@@ -49,18 +49,15 @@ def process(parames, person: str):
 
     one_person = RAW_PATH / person
 
+    # prepare the preprocess
+    preprocess = Preprocess(parames, one_video)
 
     for one_video in one_person.iterdir():
 
-        # prepare the preprocess
-        preprocess = Preprocess(parames, one_video)
+        vframes, _, info = read_video(one_video, pts_unit="sec", output_format="THWC")
 
-        vframes, _, _ = read_video(one_video, pts_unit="sec", output_format="TCHW")
-
-        # * step3: use preprocess to get information.
+        # * use preprocess to get information.
         # the format is: final_frames, bbox_none_index, label, optical_flow, bbox, mask, pose
-        # TCHW > CTHW > BCTHW
-        m_vframes = vframes.permute(1, 0, 2, 3).unsqueeze(0)
         (
             frames,
             bbox_none_index,
@@ -69,9 +66,9 @@ def process(parames, person: str):
             mask,
             keypoints,
             keypoints_score,
-        ) = preprocess(m_vframes, 0)
+        ) = preprocess(vframes, one_video)
 
-        # * step4: save the video frames keypoint
+        # * save the video frames keypoint
 
         # * packe the bbox and mask
         sample_json_info = {

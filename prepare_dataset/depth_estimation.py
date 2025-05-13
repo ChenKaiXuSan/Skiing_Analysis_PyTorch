@@ -67,33 +67,42 @@ class DepthEstimator:
 
         return depth
 
-    def process_batch(self, batch: torch.Tensor):
+    # def process_batch(self, batch: torch.Tensor):
 
-        # batch is a tensor of shape (b, c, t, h, w)
-        b, c, t, h, w = batch.shape
+    #     # batch is a tensor of shape (b, c, t, h, w)
+    #     b, c, t, h, w = batch.shape
 
-        for batch_idx in range(b):
+    #     for batch_idx in range(b):
             
-            # c, t, h, w > t, h, w, c
-            one_batch_numpy = (
-                batch[batch_idx, [2, 1, 0], ...]
-                .permute(1, 2, 3, 0)
-                .to(torch.uint8)
-                .numpy()
-            )
+    #         # c, t, h, w > t, h, w, c
+    #         one_batch_numpy = (
+    #             batch[batch_idx, [2, 1, 0], ...]
+    #             .permute(1, 2, 3, 0)
+    #             .to(torch.uint8)
+    #             .numpy()
+    #         )
             
-            assert one_batch_numpy.shape == (t, h, w, c)
-            assert one_batch_numpy.dtype == np.uint8
+    #         assert one_batch_numpy.shape == (t, h, w, c)
+    #         assert one_batch_numpy.dtype == np.uint8
 
-            # estimate depth for each image
-            depths = self.estimate_depth(one_batch_numpy)
+    #         # estimate depth for each image
+    #         depths = self.estimate_depth(one_batch_numpy)
+
+    #     return depths
+    
+    def __call__(self, vframes: torch.Tensor):
+
+        t, h, w, c = vframes.shape
+
+        vframes_numpy = (
+            vframes.to(torch.uint8)
+            .numpy()
+        )
+
+        assert vframes_numpy.shape == (t, h, w, c)
+        assert vframes_numpy.dtype == np.uint8
+        
+        depths = self.estimate_depth(vframes_numpy)
+
 
         return depths
-    
-    def __call__(self, batch: torch.Tensor):
-
-        b, c, t, h, w = batch.shape
-
-        depth = self.process_batch(batch)
-
-        return depth

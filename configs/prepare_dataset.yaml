@@ -17,6 +17,9 @@ YOLO:
   save_path: "/workspace/data/vis"
 
 depth_estimator:
+  dpt_processor_path: "/workspace/code/ckpt/"
+  dpt_model_path: "/workspace/code/ckpt/"
+
   model: Intel/dpt-large
   device: 1
   save_path: "/workspace/data/depth"
@@ -28,3 +31,5 @@ extract_dataset:
   save_path: "/workspace/data/" # this is extracted video path.
 
 OF: false
+
+batch_size: 20

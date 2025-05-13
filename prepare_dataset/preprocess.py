@@ -208,7 +208,7 @@ class Preprocess(nn.Module):
             else:
                 raise ValueError("shape not match")
 
-    def forward(self, batch: torch.tensor, batch_idx: int):
+    def forward(self, vframes: torch.tensor, video_path: int):
         """
         forward preprocess method for one batch.
 
@@ -220,18 +220,18 @@ class Preprocess(nn.Module):
             list: list for different moddailty, return video, bbox_non_index, labels, bbox, mask, pose
         """
 
-        b, c, t, h, w = batch.shape
+        t, h, w, c = vframes.shape
 
-        # process depth
-        depth = self.depth_estimator(batch)
+        # * process depth
+        depth = self.depth_estimator(vframes)
         
-        # process mask, pose
-        video, bbox_none_index, bbox, mask, pose, pose_score = self.yolo_model(batch)
+        # * process mask, pose, bbox
+        video, bbox_none_index, bbox, mask, pose, pose_score = self.yolo_model(vframes)
 
         # FIXME: OF method have some problem, the reason do not know.
         # when not use OF, return None value.
         if self.of_model is not None:
-            optical_flow = self.of_model.process_batch(batch)
+            optical_flow = self.of_model.process_batch(vframes)
         else:
             optical_flow = None
 
