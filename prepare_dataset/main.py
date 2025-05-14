@@ -34,10 +34,8 @@ from torchvision.io import read_video
 from project.utils import del_folder, make_folder
 from prepare_dataset.preprocess import Preprocess
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 
+logger = logging.getLogger(__name__)
 
 def process(parames, person: str):
     RAW_PATH = Path(parames.extract_dataset.data_path)
@@ -45,15 +43,15 @@ def process(parames, person: str):
 
     logging.info(f"Start process the {person} video")
 
-    res = {}
-
     one_person = RAW_PATH / person
 
     # prepare the preprocess
-    preprocess = Preprocess(parames, one_video)
+    preprocess = Preprocess(parames)
 
     for one_video in one_person.iterdir():
 
+        res = {}
+        
         vframes, _, info = read_video(one_video, pts_unit="sec", output_format="THWC")
 
         # * use preprocess to get information.
@@ -66,6 +64,7 @@ def process(parames, person: str):
             mask,
             keypoints,
             keypoints_score,
+            depth,
         ) = preprocess(vframes, one_video)
 
         # * save the video frames keypoint
@@ -80,6 +79,7 @@ def process(parames, person: str):
             "bbox": bbox,  # serialized as list
             "mask": mask,
             # "optical_flow": optical_flow.tolist(),
+            "depth": depth,
             "keypoint": {
                 "keypoint": keypoints,
                 "keypoint_score": keypoints_score,
@@ -88,9 +88,9 @@ def process(parames, person: str):
 
         res[one_video.name] = sample_json_info
 
-    # * step5: save the video frames to json file
-    save_to_json(res, SAVE_PATH, person)  # save the sample info to json file.
-    save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
+        # * step5: save the video frames to json file
+        save_to_json(res, SAVE_PATH, person)  # save the sample info to json file.
+        save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
 
 
 def save_to_json(sample_info: dict, save_path: Path, person: str) -> None:

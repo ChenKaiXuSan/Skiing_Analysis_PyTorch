@@ -20,33 +20,36 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
-import torch
-import torchvision
+from tqdm import tqdm
+from pathlib import Path
 
-import os
+import torch
 
 import logging
 import numpy as np
+from PIL import Image
 from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
 
-class MultiPreprocess(torch.nn.Module):
+class MultiPreprocess:
     def __init__(self, configs) -> None:
         super().__init__()
 
         # load model
-        self.yolo_bbox = YOLO(configs.bbox_ckpt)
-        self.yolo_pose = YOLO(configs.pose_ckpt)
-        self.yolo_mask = YOLO(configs.seg_ckpt)
+        self.yolo_bbox = YOLO(configs.YOLO.bbox_ckpt)
+        self.yolo_pose = YOLO(configs.YOLO.pose_ckpt)
+        self.yolo_mask = YOLO(configs.YOLO.seg_ckpt)
 
-        self.conf = configs.conf
-        self.iou = configs.iou
-        self.verbose = configs.verbose
+        self.conf = configs.YOLO.conf
+        self.iou = configs.YOLO.iou
+        self.verbose = configs.YOLO.verbose
         self.device = configs.device
 
-        self.img_size = configs.img_size
-        self.save_path = configs.save_path
+        self.img_size = configs.YOLO.img_size
+
+        self.save_path = Path(configs.extract_dataset.save_path) / "vis"
+        self.batch_size = configs.batch_size
         
 
     def get_YOLO_pose_result(self, frame_batch: np.ndarray):
@@ -63,12 +66,13 @@ class MultiPreprocess(torch.nn.Module):
         t, h, w, c = frame_batch.shape
 
         one_batch_keypoint = {}
-        none_index = []
         one_batch_keypoint_score = {}
 
-        with torch.no_grad():
-            for frame in range(t):
+        res_list = []
+        none_index = []
 
+        with torch.no_grad():
+            for frame in tqdm(range(t), desc="YOLO Pose", leave=False):
                 results = self.yolo_pose(
                     source=np.ascontiguousarray(frame_batch[frame]),
                     conf=self.conf,
@@ -81,7 +85,7 @@ class MultiPreprocess(torch.nn.Module):
                     device=self.device,
                 )
 
-                for i, r in enumerate(results):
+                for r in results:
                     # judge if have keypoints.
                     # one_batch_keypoint.append(r.keypoints.data) # 1, 17, 3
                     if list(r.keypoints.xyn.shape) != [1, 17, 2]:
@@ -92,21 +96,23 @@ class MultiPreprocess(torch.nn.Module):
                         one_batch_keypoint[frame] = r.keypoints.xyn  # 1, 17
                         one_batch_keypoint_score[frame] = r.keypoints.conf  # 1, 17
 
-        return one_batch_keypoint, none_index, one_batch_keypoint_score
+                    res_list.append(r)
 
-    def save_result(self, r, frame):
+        return one_batch_keypoint, none_index, one_batch_keypoint_score, res_list
 
-        # save res to img
-        _path = self.save_path + "/" + self.video_name
+    def save_result(self, r, video_path: Path, flag: str = "pose"):
+        
+        person = video_path.parts[-2]
+        video_name = video_path.stem
 
-        if not os.path.exists(_path):
-            os.makedirs(_path)
-
-        torchvision.io.write_png(
-            torch.tensor(r.plot()).permute(2, 0, 1),
-            os.path.join(_path, f"{frame}_keypoint.png"),
-        )
-
+        _save_path = self.save_path / flag / person / video_name
+        if not _save_path.exists():
+            _save_path.mkdir(parents=True, exist_ok=True)
+        
+        for i, res in tqdm(enumerate(r), desc=f"Save Result-{flag}", leave=False):
+            
+            img = Image.fromarray(res.plot())
+            img.save(_save_path / f"{i}_{flag}.png")
 
     def get_YOLO_mask_result(self, frame_batch: np.ndarray):
         """
@@ -123,9 +129,10 @@ class MultiPreprocess(torch.nn.Module):
 
         one_batch_mask = {}
         none_index = []
+        res_list = []
 
         with torch.no_grad():
-            for frame in range(t):
+            for frame in tqdm(range(t), desc="YOLO Mask", leave=False):
                 results = self.yolo_mask(
                     source=frame_batch[frame],
                     conf=self.conf,
@@ -138,7 +145,7 @@ class MultiPreprocess(torch.nn.Module):
                     device=self.device,
                 )
 
-                for i, r in enumerate(results):
+                for r in results:
                     # judge if have mask.
                     if r.masks is None:
                         none_index.append(frame)
@@ -150,7 +157,9 @@ class MultiPreprocess(torch.nn.Module):
                         # ? sometime will get two type for masks.
                         one_batch_mask[frame] = r.masks.data[:1, ...]  # 1, 224, 224
 
-        return one_batch_mask, none_index
+                    res_list.append(r)
+
+        return one_batch_mask, none_index, res_list
 
     def get_YOLO_bbox_result(self, frame_batch: np.ndarray):
         """
@@ -167,9 +176,11 @@ class MultiPreprocess(torch.nn.Module):
 
         one_batch_bbox = {}
         none_index = []
+        res_list = []
 
         with torch.no_grad():
-            for frame in range(t):
+            for frame in tqdm(range(t), desc="YOLO BBox", leave=False):
+                # 
                 results = self.yolo_bbox(
                     source=frame_batch[frame],
                     conf=self.conf,
@@ -182,7 +193,7 @@ class MultiPreprocess(torch.nn.Module):
                     device=self.device,
                 )
 
-                for i, r in enumerate(results):
+                for r in results:
                     # judge if have bbox.
                     if r.boxes is None or r.boxes.shape[0] == 0:
                         none_index.append(frame)
@@ -194,7 +205,9 @@ class MultiPreprocess(torch.nn.Module):
                         # ? sometime will get two type for bbox.
                         one_batch_bbox[frame] = r.boxes.xywh[:1, ...]  # 1, 4
 
-        return one_batch_bbox, none_index
+                    res_list.append(r)
+
+        return one_batch_bbox, none_index, res_list
 
     def delete_tensor(self, video: torch.tensor, delete_idx: int, next_idx: int):
         """
@@ -260,8 +273,9 @@ class MultiPreprocess(torch.nn.Module):
 
         return list(batch_Dict.values()), filter_batch
 
-    def process_batch(self, batch: torch.Tensor):
-        b, c, t, h, w = batch.shape
+    def process_batch(self, vframes: torch.Tensor, video_path: Path):
+        
+        t, h, w, c = vframes.shape
 
         # for one batch prepare.
         pred_mask_list = []
@@ -270,68 +284,58 @@ class MultiPreprocess(torch.nn.Module):
         pred_keypoint_score_list = []
         pred_none_index = []
 
-        for batch_index in range(b):
+        vframes_numpy = vframes.numpy()
 
-            # ! now, the ultralytics support torch.tensor type, but here have some strange problem. So had better use numpy type.
-            # ! np.ndarray type, HWC format with BGR channels uint8 (0-255).
-            # c, t, h, w > t, h, w, c, RGB > BGR
-            one_batch_numpy = (
-                batch[batch_index, [2, 1, 0], ...]
-                .permute(1, 2, 3, 0)
-                .to(torch.uint8)
-                .numpy()
-            )
+        # * process bbox
+        one_batch_bbox_Dict, one_bbox_none_index, one_bbox_res_list = self.get_YOLO_bbox_result(
+            vframes_numpy
+        )
 
-            # one_batch_numpy = np.resize(
-            #     one_batch_numpy, (t, h, w, c)
-            # )  # (t, h, w, c) > (t, h, w, c)
+        # ! notice, if there have none index, we also need copy the next frame to none index.
+        one_batch_bbox, filter_batch = self.process_none(
+            vframes_numpy, one_batch_bbox_Dict, one_bbox_none_index
+        )
 
-            # check shape and dtype in numpy
-            assert one_batch_numpy.shape == (t, h, w, c)
-            assert one_batch_numpy.dtype == np.uint8
+        self.save_result(one_bbox_res_list, video_path, "bbox")    
 
-            # * process one batch bbox
-            one_batch_bbox_Dict, one_bbox_none_index = self.get_YOLO_bbox_result(
-                one_batch_numpy
-            )
+        # * process mask
+        one_batch_mask_Dict, one_mask_none_index, one_mask_res_list = self.get_YOLO_mask_result(
+            vframes_numpy
+        )
+        one_batch_mask, _ = self.process_none(
+            vframes_numpy, one_batch_mask_Dict, one_mask_none_index
+        )
 
-            # ! notice, if there have none index, we also need copy the next frame to none index.
-            one_batch_bbox, filter_batch = self.process_none(
-                batch, one_batch_bbox_Dict, one_bbox_none_index
-            )
+        self.save_result(one_mask_res_list, video_path, "mask")
 
-            # * process one batch mask
-            one_batch_mask_Dict, one_mask_none_index = self.get_YOLO_mask_result(
-                one_batch_numpy
-            )
-            one_batch_mask, _ = self.process_none(
-                batch, one_batch_mask_Dict, one_mask_none_index
-            )
+        # * process keypoint
+        (
+            one_batch_keypoint_Dict,
+            one_pose_none_index,
+            one_batch_keypoint_score_Dict,
+            one_pose_res_list,
+        ) = self.get_YOLO_pose_result(vframes_numpy)
+        one_batch_keypoint, _ = self.process_none(
+            vframes_numpy, one_batch_keypoint_Dict, one_pose_none_index
+        )
+        one_batch_keypoint_score, _ = self.process_none(
+            vframes_numpy, one_batch_keypoint_score_Dict, one_pose_none_index
+        )
 
-            # * process one batch keypoint
-            (
-                one_batch_keypoint_Dict,
-                one_pose_none_index,
-                one_batch_keypoint_score_Dict,
-            ) = self.get_YOLO_pose_result(one_batch_numpy)
-            one_batch_keypoint, _ = self.process_none(
-                batch, one_batch_keypoint_Dict, one_pose_none_index
-            )
-            one_batch_keypoint_score, _ = self.process_none(
-                batch, one_batch_keypoint_score_Dict, one_pose_none_index
-            )
+        self.save_result(one_pose_res_list, video_path, "pose")
 
-            pred_bbox_list.append(
-                torch.stack(one_batch_bbox, dim=0).squeeze()
-            )  # t, cxcywh
-            pred_mask_list.append(torch.stack(one_batch_mask, dim=1))  # c, t, h, w
-            pred_keypoint_list.append(
-                torch.stack(one_batch_keypoint, dim=0).squeeze()
-            )  # t, keypoint, value
-            pred_keypoint_score_list.append(
-                torch.cat(one_batch_keypoint_score, dim=0).squeeze()
-            )  # t, keypoint, value
-            pred_none_index.append(one_bbox_none_index)
+        # TODO: 这里的逻辑可以修改一下，这些操作是不需要的
+        pred_bbox_list.append(
+            torch.stack(one_batch_bbox, dim=0).squeeze()
+        )  # t, cxcywh
+        pred_mask_list.append(torch.stack(one_batch_mask, dim=1))  # c, t, h, w
+        pred_keypoint_list.append(
+            torch.stack(one_batch_keypoint, dim=0).squeeze()
+        )  # t, keypoint, value
+        pred_keypoint_score_list.append(
+            torch.cat(one_batch_keypoint_score, dim=0).squeeze()
+        )  # t, keypoint, value
+        pred_none_index.append(one_bbox_none_index)
 
         # return batch, label, bbox, mask, keypoint
         return (
@@ -342,25 +346,20 @@ class MultiPreprocess(torch.nn.Module):
             torch.stack(pred_keypoint_list, dim=0),  # b, t, keypoint, value
             torch.stack(pred_keypoint_score_list, dim=0),  # b, t, keypoint, value
         )
+    
+    def __call__(self, vframes: torch.Tensor, video_path: Path):
 
-    def forward(self, batch):
+        t, h, w, c = vframes.shape
 
-        b, c, t, h, w = batch.shape
-        # batch, (b, c, t, h, w)
-        # bbox_none_index, (b, t)
-        # bbox, (b, t, 4) (cxcywh)
-        # mask, (b, 1, t, h, w)
-        # keypoint, (b, t, 17, 2)
-        # keypoint score, (b, t, 17, 1)
         video, bbox_none_index, bbox, mask, keypoint, keypoint_score = (
-            self.process_batch(batch)
+            self.process_batch(vframes, video_path)
         )
 
         # shape check
-        assert video.shape == batch.shape
-        assert bbox.shape[0] == b and bbox.shape[1] == t
-        assert mask.shape[2] == t and mask.shape[0] == b
-        assert keypoint.shape[0] == b and keypoint.shape[1] == t
-        assert keypoint_score.shape[0] == b and keypoint_score.shape[1] == t
+        # assert video.shape == batch.shape
+        # assert bbox.shape[0] == b and bbox.shape[1] == t
+        # assert mask.shape[2] == t and mask.shape[0] == b
+        # assert keypoint.shape[0] == b and keypoint.shape[1] == t
+        # assert keypoint_score.shape[0] == b and keypoint_score.shape[1] == t
 
         return video, bbox_none_index, bbox, mask, keypoint, keypoint_score
