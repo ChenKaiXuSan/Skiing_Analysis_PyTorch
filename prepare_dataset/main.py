@@ -89,7 +89,7 @@ def process(parames, person: str):
         res[one_video.name] = sample_json_info
 
         # * step5: save the video frames to json file
-        save_to_json(res, SAVE_PATH, person)  # save the sample info to json file.
+        # save_to_json(res, SAVE_PATH, person)  # save the sample info to json file.
         save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
 
 

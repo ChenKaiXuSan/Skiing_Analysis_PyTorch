@@ -109,7 +109,7 @@ class MultiPreprocess:
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
         
-        for i, res in tqdm(enumerate(r), desc=f"Save Result-{flag}", leave=False):
+        for i, res in tqdm(enumerate(r), total=len(r), desc=f"Save Result-{flag}", leave=False):
             
             img = Image.fromarray(res.plot())
             img.save(_save_path / f"{i}_{flag}.png")
@@ -296,7 +296,7 @@ class MultiPreprocess:
             vframes_numpy, one_batch_bbox_Dict, one_bbox_none_index
         )
 
-        self.save_result(one_bbox_res_list, video_path, "bbox")    
+        # self.save_result(one_bbox_res_list, video_path, "bbox")    
 
         # * process mask
         one_batch_mask_Dict, one_mask_none_index, one_mask_res_list = self.get_YOLO_mask_result(
@@ -306,7 +306,7 @@ class MultiPreprocess:
             vframes_numpy, one_batch_mask_Dict, one_mask_none_index
         )
 
-        self.save_result(one_mask_res_list, video_path, "mask")
+        # self.save_result(one_mask_res_list, video_path, "mask")
 
         # * process keypoint
         (
