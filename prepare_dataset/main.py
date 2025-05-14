@@ -112,6 +112,7 @@ def save_to_json(sample_info: dict, save_path: Path, person: str) -> None:
         v["mask"] = v["mask"].tolist()
         v["keypoint"]["keypoint"] = v["keypoint"]["keypoint"].tolist()
         v["keypoint"]["keypoint_score"] = v["keypoint"]["keypoint_score"].tolist()
+        v["depth"] = v["depth"].tolist()
 
         with open(save_path_with_name, "w") as f:
             json.dump(v, f, indent=4)
