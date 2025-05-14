@@ -20,22 +20,18 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
-import shutil
 import logging
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 
-from torchvision.io import write_png
-from torchvision.utils import flow_to_image
 
 from prepare_dataset.yolov11 import MultiPreprocess
 from prepare_dataset.depth_estimation import DepthEstimator
 from prepare_dataset.optical_flow import OpticalFlow
 
 
-class Preprocess(nn.Module):
+class Preprocess:
     def __init__(self, config) -> None:
         super(Preprocess, self).__init__()
 
@@ -88,7 +84,7 @@ class Preprocess(nn.Module):
     #         else:
     #             raise ValueError("shape not match")
 
-    def forward(self, vframes: torch.tensor, video_path: Path):
+    def __call__(self, vframes: torch.tensor, video_path: Path):
         """
         forward preprocess method for one batch.
 
@@ -99,12 +95,14 @@ class Preprocess(nn.Module):
         Returns:
             list: list for different moddailty, return video, bbox_non_index, labels, bbox, mask, pose
         """
-        
+
         # * process depth
         depth = self.depth_estimator(vframes, video_path)
-        
+
         # * process mask, pose, bbox
-        video, bbox_none_index, bbox, mask, pose, pose_score = self.yolo_model(vframes, video_path)
+        video, bbox_none_index, bbox, mask, pose, pose_score = self.yolo_model(
+            vframes, video_path
+        )
 
         # FIXME: OF method have some problem, the reason do not know.
         # when not use OF, return Nlone value.
@@ -112,7 +110,6 @@ class Preprocess(nn.Module):
             optical_flow = self.of_model.process_batch(vframes)
         else:
             optical_flow = None
-
 
         # shape check
         # self.shape_check([video, mask, bbox, pose, optical_flow])

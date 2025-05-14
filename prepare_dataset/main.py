@@ -37,6 +37,7 @@ from prepare_dataset.preprocess import Preprocess
 
 logger = logging.getLogger(__name__)
 
+
 def process(parames, person: str):
     RAW_PATH = Path(parames.extract_dataset.data_path)
     SAVE_PATH = Path(parames.extract_dataset.save_path)
@@ -51,7 +52,7 @@ def process(parames, person: str):
     for one_video in one_person.iterdir():
 
         res = {}
-        
+
         vframes, _, info = read_video(one_video, pts_unit="sec", output_format="THWC")
 
         # * use preprocess to get information.
@@ -76,13 +77,13 @@ def process(parames, person: str):
             "img_shape": (vframes.shape[2], vframes.shape[3]),
             "frame_count": vframes.shape[0],
             "none_index": bbox_none_index,
-            "bbox": bbox,  # serialized as list
-            "mask": mask,
+            "bbox": bbox.cpu(),  # xywh
+            "mask": mask.cpu(), 
             # "optical_flow": optical_flow.tolist(),
-            "depth": depth,
+            "depth": depth.cpu(),
             "keypoint": {
-                "keypoint": keypoints,
-                "keypoint_score": keypoints_score,
+                "keypoint": keypoints.cpu(), # xyn
+                "keypoint_score": keypoints_score.cpu(),
             },
         }
 
