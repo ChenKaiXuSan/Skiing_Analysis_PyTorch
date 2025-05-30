@@ -34,9 +34,8 @@ from torchvision.io import read_video
 from project.utils import del_folder, make_folder
 from prepare_dataset.preprocess import Preprocess
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+
+logger = logging.getLogger(__name__)
 
 
 def process(parames, person: str):
@@ -45,22 +44,19 @@ def process(parames, person: str):
 
     logging.info(f"Start process the {person} video")
 
-    res = {}
-
     one_person = RAW_PATH / person
 
+    # prepare the preprocess
+    preprocess = Preprocess(parames)
 
     for one_video in one_person.iterdir():
 
-        # prepare the preprocess
-        preprocess = Preprocess(parames, one_video)
+        res = {}
 
-        vframes, _, _ = read_video(one_video, pts_unit="sec", output_format="TCHW")
+        vframes, _, info = read_video(one_video, pts_unit="sec", output_format="THWC")
 
-        # * step3: use preprocess to get information.
+        # * use preprocess to get information.
         # the format is: final_frames, bbox_none_index, label, optical_flow, bbox, mask, pose
-        # TCHW > CTHW > BCTHW
-        m_vframes = vframes.permute(1, 0, 2, 3).unsqueeze(0)
         (
             frames,
             bbox_none_index,
@@ -69,9 +65,10 @@ def process(parames, person: str):
             mask,
             keypoints,
             keypoints_score,
-        ) = preprocess(m_vframes, 0)
+            depth,
+        ) = preprocess(vframes, one_video)
 
-        # * step4: save the video frames keypoint
+        # * save the video frames keypoint
 
         # * packe the bbox and mask
         sample_json_info = {
@@ -80,20 +77,21 @@ def process(parames, person: str):
             "img_shape": (vframes.shape[2], vframes.shape[3]),
             "frame_count": vframes.shape[0],
             "none_index": bbox_none_index,
-            "bbox": bbox,  # serialized as list
-            "mask": mask,
+            "bbox": bbox.cpu(),  # xywh
+            "mask": mask.cpu(), 
             # "optical_flow": optical_flow.tolist(),
+            "depth": depth.cpu(),
             "keypoint": {
-                "keypoint": keypoints,
-                "keypoint_score": keypoints_score,
+                "keypoint": keypoints.cpu(), # xyn
+                "keypoint_score": keypoints_score.cpu(),
             },
         }
 
         res[one_video.name] = sample_json_info
 
-    # * step5: save the video frames to json file
-    save_to_json(res, SAVE_PATH, person)  # save the sample info to json file.
-    save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
+        # * step5: save the video frames to json file
+        # save_to_json(res, SAVE_PATH, person)  # save the sample info to json file.
+        save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
 
 
 def save_to_json(sample_info: dict, save_path: Path, person: str) -> None:
@@ -115,6 +113,7 @@ def save_to_json(sample_info: dict, save_path: Path, person: str) -> None:
         v["mask"] = v["mask"].tolist()
         v["keypoint"]["keypoint"] = v["keypoint"]["keypoint"].tolist()
         v["keypoint"]["keypoint_score"] = v["keypoint"]["keypoint_score"].tolist()
+        v["depth"] = v["depth"].tolist()
 
         with open(save_path_with_name, "w") as f:
             json.dump(v, f, indent=4)

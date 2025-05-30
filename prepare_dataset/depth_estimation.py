@@ -20,6 +20,9 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
+from pathlib import Path
+from tqdm import tqdm
+
 from transformers import DPTImageProcessor, DPTForDepthEstimation
 import torch
 import numpy as np
@@ -29,71 +32,72 @@ from PIL import Image
 class DepthEstimator:
     def __init__(self, configs):
 
-        model_name = configs.model
+        model_name = configs.depth_estimator.model
+
         self.device = configs.device
 
-        self.processor = DPTImageProcessor.from_pretrained(model_name)
-        self.model = DPTForDepthEstimation.from_pretrained(model_name).to(configs.device)
+        self.processor = DPTImageProcessor.from_pretrained(model_name, cache_dir=configs.depth_estimator.dpt_processor_path)
+        self.model = DPTForDepthEstimation.from_pretrained(model_name, cache_dir=configs.depth_estimator.dpt_model_path).to(self.device)
 
-    def estimate_depth(self, frame_batch: np.ndarray):
+        self.save_path = Path(configs.extract_dataset.save_path) / "vis" / "depth"
+        self.batch_size = configs.batch_size
         
-        t, h, w, c = frame_batch.shape
+                      
+    def estimate_depth(self, frames: np.ndarray):
+        
+        t, h, w, c = frames.shape
+        
+        # prepare image for the model
+        inputs = self.processor(images=frames, return_tensors="pt").to(self.device)
 
-        one_batch_depth = [] 
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            predicted_depth = outputs.predicted_depth
 
-        for frame in frame_batch:
-            
-            # prepare image for the model
-            inputs = self.processor(images=frame, return_tensors="pt").to(self.device)
-
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                predicted_depth = outputs.predicted_depth
-
-            # interpolate to original size
-            prediction = torch.nn.functional.interpolate(
-                predicted_depth.unsqueeze(1),
-                size=(h, w),
-                mode="bicubic",
-                align_corners=False,
-            )
-
-            one_batch_depth.append(prediction) # t, d, h, w
-
-            # visualize the prediction
-            output = prediction.squeeze().cpu().numpy()
-            formatted = (output * 255 / np.max(output)).astype("uint8")
-            depth = Image.fromarray(formatted)
-
-        return depth
-
-    def process_batch(self, batch: torch.Tensor):
-
-        # batch is a tensor of shape (b, c, t, h, w)
-        b, c, t, h, w = batch.shape
-
-        for batch_idx in range(b):
-            
-            # c, t, h, w > t, h, w, c
-            one_batch_numpy = (
-                batch[batch_idx, [2, 1, 0], ...]
-                .permute(1, 2, 3, 0)
-                .to(torch.uint8)
-                .numpy()
-            )
-            
-            assert one_batch_numpy.shape == (t, h, w, c)
-            assert one_batch_numpy.dtype == np.uint8
-
-            # estimate depth for each image
-            depths = self.estimate_depth(one_batch_numpy)
-
-        return depths
+        # interpolate to original size
+        prediction = torch.nn.functional.interpolate(
+            predicted_depth.unsqueeze(1),
+            size=(h, w),
+            mode="bicubic",
+            align_corners=False,
+        )
+        
+        return prediction
     
-    def __call__(self, batch: torch.Tensor):
+    def save_image(self, image: torch.Tensor, i: int, video_path: Path):
+        """
+        Save the image to the specified path.
+        """
 
-        b, c, t, h, w = batch.shape
+        person = video_path.parts[-2]
+        video_name = video_path.stem   
 
-        depth = self.process_batch(batch)
+        _save_path = self.save_path / person / video_name
+        if not _save_path.exists():
+            _save_path.mkdir(parents=True, exist_ok=True)
+        
+        # visualize the prediction
 
-        return depth
+        output = image.squeeze().cpu().numpy()
+        formatted = (output * 255 / np.max(output)).astype("uint8")
+        depth = Image.fromarray(formatted)
+
+        depth.save(_save_path / f"{i}_depth.png")
+    
+    def __call__(self, vframes: torch.Tensor, video_path: Path):
+
+        t, h, w, c = vframes.shape
+
+        res_depth = []
+
+        for i in tqdm(range(t), desc="Depth Estimation", leave=False):
+
+            vframes_numpy = vframes[i].unsqueeze(0).numpy()
+
+            depths = self.estimate_depth(vframes_numpy)
+
+            self.save_image(depths, i, video_path)   
+
+            res_depth.append(depths.cpu())
+
+        return torch.cat(res_depth, dim=0)
