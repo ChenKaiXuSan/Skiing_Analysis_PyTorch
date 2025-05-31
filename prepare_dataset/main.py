@@ -27,6 +27,8 @@ import json
 import logging
 from pathlib import Path
 import hydra
+import cv2
+from tqdm import tqdm
 
 import torch
 from torchvision.io import read_video
@@ -78,11 +80,11 @@ def process(parames, person: str):
             "frame_count": vframes.shape[0],
             "none_index": bbox_none_index,
             "bbox": bbox.cpu(),  # xywh
-            "mask": mask.cpu(), 
+            "mask": mask.cpu(),
             # "optical_flow": optical_flow.tolist(),
             "depth": depth.cpu(),
             "keypoint": {
-                "keypoint": keypoints.cpu(), # xyn
+                "keypoint": keypoints.cpu(),  # xyn
                 "keypoint_score": keypoints_score.cpu(),
             },
         }
@@ -92,6 +94,34 @@ def process(parames, person: str):
         # * step5: save the video frames to json file
         # save_to_json(res, SAVE_PATH, person)  # save the sample info to json file.
         save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
+
+        # merge the frame into video
+        merge_frame_to_video(SAVE_PATH, person, one_video.stem)
+
+
+def merge_frame_to_video(save_path: Path, person: str, video_name: str):
+    _save_path = save_path / "vis" / "pose" / person / video_name
+    _out_path = save_path / "vis_video" / person 
+
+    frames = sorted(list(_save_path.iterdir()), key=lambda x: int(x.stem.split("_")[0]))
+
+    if not _out_path.exists():
+        _out_path.mkdir(parents=True, exist_ok=True)
+
+    first_frame = cv2.imread(str(frames[0]))
+    height, width, _ = first_frame.shape
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out = cv2.VideoWriter(
+        str(_out_path / video_name) + ".mp4", fourcc, 30.0, (width, height)
+    )
+
+    for f in tqdm(frames, desc=f"Processing {video_name}", total=len(frames)):
+        img = cv2.imread(str(f))
+        out.write(img)
+
+    out.release()
+    logger.info(f"Video saved to {_out_path / video_name}.mp4")
 
 
 def save_to_json(sample_info: dict, save_path: Path, person: str) -> None:

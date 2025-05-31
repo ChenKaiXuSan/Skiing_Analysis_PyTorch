@@ -22,6 +22,7 @@ Date      	By	Comments
 
 from tqdm import tqdm
 from pathlib import Path
+from collections import defaultdict
 
 import torch
 
@@ -32,6 +33,7 @@ from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
 
+
 class MultiPreprocess:
     def __init__(self, configs) -> None:
         super().__init__()
@@ -40,6 +42,7 @@ class MultiPreprocess:
         self.yolo_bbox = YOLO(configs.YOLO.bbox_ckpt)
         self.yolo_pose = YOLO(configs.YOLO.pose_ckpt)
         self.yolo_mask = YOLO(configs.YOLO.seg_ckpt)
+        self.tracking = configs.YOLO.tracking
 
         self.conf = configs.YOLO.conf
         self.iou = configs.YOLO.iou
@@ -50,7 +53,6 @@ class MultiPreprocess:
 
         self.save_path = Path(configs.extract_dataset.save_path) / "vis"
         self.batch_size = configs.batch_size
-        
 
     def get_YOLO_pose_result(self, frame_batch: np.ndarray):
         """
@@ -70,22 +72,46 @@ class MultiPreprocess:
 
         res_list = []
         none_index = []
+        track_history = defaultdict(lambda: [])
 
         with torch.no_grad():
             for frame in tqdm(range(t), desc="YOLO Pose", leave=False):
-                results = self.yolo_pose(
-                    source=np.ascontiguousarray(frame_batch[frame]),
-                    conf=self.conf,
-                    iou=self.iou,
-                    save_crop=False,
-                    classes=0,
-                    vid_stride=True,
-                    stream=False,
-                    verbose=self.verbose,
-                    device=self.device,
-                )
+                if self.tracking:
+                    results = self.yolo_pose.track(
+                        source=np.ascontiguousarray(frame_batch[frame]),
+                        conf=self.conf,
+                        iou=self.iou,
+                        save_crop=False,
+                        classes=0,
+                        vid_stride=True,
+                        stream=False,
+                        verbose=self.verbose,
+                        device=self.device,
+                    )
+                else:
+                    results = self.yolo_pose(
+                        source=np.ascontiguousarray(frame_batch[frame]),
+                        conf=self.conf,
+                        iou=self.iou,
+                        save_crop=False,
+                        classes=0,
+                        vid_stride=True,
+                        stream=False,
+                        verbose=self.verbose,
+                        device=self.device,
+                    )
 
                 for r in results:
+
+                    if r.boxes and r.boxes.is_track:
+                        boxes = r.boxes.xywh.cpu()
+                        track_ids = r.boxes.id.int().cpu().tolist()
+
+                        for box, track_id in zip(boxes, track_ids):
+                            x, y, w, h = box
+                            track = track_history[track_id]
+                            track.append([float(x), float(y)])
+
                     # judge if have keypoints.
                     # one_batch_keypoint.append(r.keypoints.data) # 1, 17, 3
                     if list(r.keypoints.xyn.shape) != [1, 17, 2]:
@@ -101,16 +127,18 @@ class MultiPreprocess:
         return one_batch_keypoint, none_index, one_batch_keypoint_score, res_list
 
     def save_result(self, r, video_path: Path, flag: str = "pose"):
-        
+
         person = video_path.parts[-2]
         video_name = video_path.stem
 
         _save_path = self.save_path / flag / person / video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
-        
-        for i, res in tqdm(enumerate(r), total=len(r), desc=f"Save Result-{flag}", leave=False):
-            
+
+        for i, res in tqdm(
+            enumerate(r), total=len(r), desc=f"Save Result-{flag}", leave=False
+        ):
+
             img = Image.fromarray(res.plot())
             img.save(_save_path / f"{i}_{flag}.png")
 
@@ -133,17 +161,30 @@ class MultiPreprocess:
 
         with torch.no_grad():
             for frame in tqdm(range(t), desc="YOLO Mask", leave=False):
-                results = self.yolo_mask(
-                    source=frame_batch[frame],
-                    conf=self.conf,
-                    iou=self.iou,
-                    save_crop=False,
-                    classes=0,
-                    vid_stride=True,
-                    stream=False,
-                    verbose=self.verbose,
-                    device=self.device,
-                )
+                if self.tracking:
+                    results = self.yolo_mask.track(
+                        source=frame_batch[frame],
+                        conf=self.conf,
+                        iou=self.iou,
+                        save_crop=False,
+                        classes=0,
+                        vid_stride=True,
+                        stream=False,
+                        verbose=self.verbose,
+                        device=self.device,
+                    )
+                else:
+                    results = self.yolo_mask(
+                        source=frame_batch[frame],
+                        conf=self.conf,
+                        iou=self.iou,
+                        save_crop=False,
+                        classes=0,
+                        vid_stride=True,
+                        stream=False,
+                        verbose=self.verbose,
+                        device=self.device,
+                    )
 
                 for r in results:
                     # judge if have mask.
@@ -180,20 +221,36 @@ class MultiPreprocess:
 
         with torch.no_grad():
             for frame in tqdm(range(t), desc="YOLO BBox", leave=False):
-                # 
-                results = self.yolo_bbox(
-                    source=frame_batch[frame],
-                    conf=self.conf,
-                    iou=self.iou,
-                    save_crop=False,
-                    classes=0,
-                    vid_stride=True,
-                    stream=False,
-                    verbose=self.verbose,
-                    device=self.device,
-                )
+                if self.tracking:
+                    track_history = defaultdict(lambda: [])
+
+                    results = self.yolo_bbox.track(
+                        source=frame_batch[frame],
+                        conf=self.conf,
+                        iou=self.iou,
+                        save_crop=False,
+                        classes=0,
+                        vid_stride=True,
+                        stream=False,
+                        verbose=self.verbose,
+                        device=self.device,
+                    )
+                else:
+
+                    results = self.yolo_bbox(
+                        source=frame_batch[frame],
+                        conf=self.conf,
+                        iou=self.iou,
+                        save_crop=False,
+                        classes=0,
+                        vid_stride=True,
+                        stream=False,
+                        verbose=self.verbose,
+                        device=self.device,
+                    )
 
                 for r in results:
+                    
                     # judge if have bbox.
                     if r.boxes is None or r.boxes.shape[0] == 0:
                         none_index.append(frame)
@@ -274,7 +331,7 @@ class MultiPreprocess:
         return list(batch_Dict.values()), filter_batch
 
     def process_batch(self, vframes: torch.Tensor, video_path: Path):
-        
+
         t, h, w, c = vframes.shape
 
         # for one batch prepare.
@@ -287,8 +344,8 @@ class MultiPreprocess:
         vframes_numpy = vframes.numpy()
 
         # * process bbox
-        one_batch_bbox_Dict, one_bbox_none_index, one_bbox_res_list = self.get_YOLO_bbox_result(
-            vframes_numpy
+        one_batch_bbox_Dict, one_bbox_none_index, one_bbox_res_list = (
+            self.get_YOLO_bbox_result(vframes_numpy)
         )
 
         # ! notice, if there have none index, we also need copy the next frame to none index.
@@ -296,11 +353,11 @@ class MultiPreprocess:
             vframes_numpy, one_batch_bbox_Dict, one_bbox_none_index
         )
 
-        self.save_result(one_bbox_res_list, video_path, "bbox")    
+        self.save_result(one_bbox_res_list, video_path, "bbox")
 
         # * process mask
-        one_batch_mask_Dict, one_mask_none_index, one_mask_res_list = self.get_YOLO_mask_result(
-            vframes_numpy
+        one_batch_mask_Dict, one_mask_none_index, one_mask_res_list = (
+            self.get_YOLO_mask_result(vframes_numpy)
         )
         one_batch_mask, _ = self.process_none(
             vframes_numpy, one_batch_mask_Dict, one_mask_none_index
@@ -325,9 +382,7 @@ class MultiPreprocess:
         self.save_result(one_pose_res_list, video_path, "pose")
 
         # TODO: 这里的逻辑可以修改一下，这些操作是不需要的
-        pred_bbox_list.append(
-            torch.stack(one_batch_bbox, dim=0).squeeze()
-        )  # t, cxcywh
+        pred_bbox_list.append(torch.stack(one_batch_bbox, dim=0).squeeze())  # t, cxcywh
         pred_mask_list.append(torch.stack(one_batch_mask, dim=1))  # c, t, h, w
         pred_keypoint_list.append(
             torch.stack(one_batch_keypoint, dim=0).squeeze()
@@ -346,7 +401,7 @@ class MultiPreprocess:
             torch.stack(pred_keypoint_list, dim=0),  # b, t, keypoint, value
             torch.stack(pred_keypoint_score_list, dim=0),  # b, t, keypoint, value
         )
-    
+
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 
         t, h, w, c = vframes.shape

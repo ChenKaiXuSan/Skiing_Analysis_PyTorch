@@ -13,6 +13,7 @@ YOLO:
   iou: 0.5
   verbose: False
   img_size: 640
+  tracking: true
 
 depth_estimator:
   dpt_processor_path: "/workspace/code/ckpt/"
