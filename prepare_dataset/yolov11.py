@@ -120,7 +120,8 @@ class MultiPreprocess:
         return one_batch_keypoint, none_index, one_batch_keypoint_score, res_list
 
     def save_result(self, r, video_path: Path, flag: str = "pose"):
-
+        
+        # TODO: save the crop img for after process.
         person = video_path.parts[-2]
         video_name = video_path.stem
 

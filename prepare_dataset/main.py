@@ -44,7 +44,7 @@ def process(parames, person: str):
     RAW_PATH = Path(parames.extract_dataset.data_path)
     SAVE_PATH = Path(parames.extract_dataset.save_path)
 
-    logging.info(f"Start process the {person} video")
+    logger.info(f"Start process the {person} video")
 
     one_person = RAW_PATH / person
 
@@ -76,12 +76,12 @@ def process(parames, person: str):
         sample_json_info = {
             "video_name": one_video.name,
             "video_path": str(one_video),
-            "img_shape": (vframes.shape[2], vframes.shape[3]),
+            "img_shape": (vframes.shape[1], vframes.shape[2]),
             "frame_count": vframes.shape[0],
             "none_index": bbox_none_index,
             "bbox": bbox.cpu(),  # xywh
             "mask": mask.cpu(),
-            # "optical_flow": optical_flow.tolist(),
+            "optical_flow": optical_flow.cpu(),
             "depth": depth.cpu(),
             "keypoint": {
                 "keypoint": keypoints.cpu(),  # xyn
@@ -102,7 +102,7 @@ def process(parames, person: str):
 
 def merge_frame_to_video(save_path: Path, person: str, video_name: str):
     _save_path = save_path / "vis" / "pose" / person / video_name
-    _out_path = save_path / "vis_video" / person 
+    _out_path = save_path / "vis_video" / person
 
     frames = sorted(list(_save_path.iterdir()), key=lambda x: int(x.stem.split("_")[0]))
 

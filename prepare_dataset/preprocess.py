@@ -25,27 +25,27 @@ from pathlib import Path
 
 import torch
 
-
 from prepare_dataset.yolov11 import MultiPreprocess
 from prepare_dataset.depth_estimation import DepthEstimator
 from prepare_dataset.optical_flow import OpticalFlow
+
+logger = logging.getLogger(__name__)
 
 
 class Preprocess:
     def __init__(self, config) -> None:
         super(Preprocess, self).__init__()
 
-        self.yolo_model = MultiPreprocess(config)
+        self.task = config.task
 
-        self.depth_estimator = DepthEstimator(config)
+        if ["pose", "bbox", "mask"] == self.task:
+            self.yolo_model = MultiPreprocess(config)
 
-        # ! notice: the OF method have err, the reason do not know.
-        if config.OF:
+        if "depth" in self.task:
+            self.depth_estimator = DepthEstimator(config)
+
+        if "optical_flow" in self.task:
             self.of_model = OpticalFlow(config)
-        else:
-            self.of_model = None
-
-        self.batch_size = config.batch_size
 
     # def shape_check(self, check: list):
     #     """
@@ -95,21 +95,20 @@ class Preprocess:
         Returns:
             list: list for different moddailty, return video, bbox_non_index, labels, bbox, mask, pose
         """
-
+        # TODO：want to use this to control the preprocess flow.
         # * process depth
-        depth = self.depth_estimator(vframes, video_path)
+        if self.depth_estimator:
+            depth = self.depth_estimator(vframes, video_path)
 
         # * process mask, pose, bbox
-        video, bbox_none_index, bbox, mask, pose, pose_score = self.yolo_model(
-            vframes, video_path
-        )
+        if self.yolo_model:
+            video, bbox_none_index, bbox, mask, pose, pose_score = self.yolo_model(
+                vframes, video_path
+            )
 
-        # FIXME: OF method have some problem, the reason do not know.
-        # when not use OF, return Nlone value.
-        if self.of_model is not None:
+        # * process optical flow
+        if self.of_model:
             optical_flow = self.of_model.process_batch(vframes)
-        else:
-            optical_flow = None
 
         # shape check
         # self.shape_check([video, mask, bbox, pose, optical_flow])

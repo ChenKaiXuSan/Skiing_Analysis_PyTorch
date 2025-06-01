@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-'''
+"""
 File: /workspace/code/Skiing_Analysis_PyTorch/prepare_dataset/__init__.py
 Project: /workspace/code/Skiing_Analysis_PyTorch/prepare_dataset
 Created Date: Wednesday April 23rd 2025
@@ -18,8 +18,4 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
-'''
-
-from prepare_dataset.main import * 
-from prepare_dataset.preprocess import *
-from prepare_dataset.yolov11 import *
+"""

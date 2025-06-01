@@ -36,17 +36,20 @@ class DepthEstimator:
 
         self.device = configs.device
 
-        self.processor = DPTImageProcessor.from_pretrained(model_name, cache_dir=configs.depth_estimator.dpt_processor_path)
-        self.model = DPTForDepthEstimation.from_pretrained(model_name, cache_dir=configs.depth_estimator.dpt_model_path).to(self.device)
+        self.processor = DPTImageProcessor.from_pretrained(
+            model_name, cache_dir=configs.depth_estimator.dpt_processor_path
+        )
+        self.model = DPTForDepthEstimation.from_pretrained(
+            model_name, cache_dir=configs.depth_estimator.dpt_model_path
+        ).to(self.device)
 
+        self.save = configs.depth_estimator.save
         self.save_path = Path(configs.extract_dataset.save_path) / "vis" / "depth"
-        self.batch_size = configs.batch_size
-        
-                      
+
     def estimate_depth(self, frames: np.ndarray):
-        
+
         t, h, w, c = frames.shape
-        
+
         # prepare image for the model
         inputs = self.processor(images=frames, return_tensors="pt").to(self.device)
 
@@ -61,21 +64,21 @@ class DepthEstimator:
             mode="bicubic",
             align_corners=False,
         )
-        
+
         return prediction
-    
+
     def save_image(self, image: torch.Tensor, i: int, video_path: Path):
         """
         Save the image to the specified path.
         """
 
         person = video_path.parts[-2]
-        video_name = video_path.stem   
+        video_name = video_path.stem
 
         _save_path = self.save_path / person / video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
-        
+
         # visualize the prediction
 
         output = image.squeeze().cpu().numpy()
@@ -83,7 +86,7 @@ class DepthEstimator:
         depth = Image.fromarray(formatted)
 
         depth.save(_save_path / f"{i}_depth.png")
-    
+
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 
         t, h, w, c = vframes.shape
@@ -96,7 +99,8 @@ class DepthEstimator:
 
             depths = self.estimate_depth(vframes_numpy)
 
-            self.save_image(depths, i, video_path)   
+            if self.save:
+                self.save_image(depths, i, video_path)
 
             res_depth.append(depths.cpu())
 

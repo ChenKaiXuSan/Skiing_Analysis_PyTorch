@@ -43,7 +43,7 @@ class OpticalFlow(nn.Module):
         self.weights = Raft_Large_Weights.DEFAULT
         self.transforms = self.weights.transforms()
 
-        self.device = param.YOLO.device
+        self.device = param.device
         # define the network
         self.model = raft_large(weights=self.weights, progress=False).to(self.device)
 
@@ -78,7 +78,7 @@ class OpticalFlow(nn.Module):
 
         with torch.no_grad():
             for i in range(0, f, interval):
-                
+
                 # todo: maybe under scalse the img size.
                 # transforms
                 current_frame_batch, next_frame_batch = self.transforms(

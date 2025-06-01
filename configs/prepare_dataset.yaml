@@ -14,12 +14,12 @@ YOLO:
   verbose: False
   img_size: 640
   tracking: true
-  save: true
+  save: false
 
 depth_estimator:
   dpt_processor_path: "/workspace/code/ckpt/"
   dpt_model_path: "/workspace/code/ckpt/"
-
+  save: true
   model: Intel/dpt-large
 
 # Path
@@ -28,7 +28,9 @@ extract_dataset:
   data_path: "/workspace/data/raw" # this is raw data path.
   save_path: "/workspace/data/" # this is extracted video path.
 
-OF: false
+OF: true
 
 batch_size: 30
 device: 1
+
+task: ["pose", "mask", "bbox", "depth", "optical_flow"]
