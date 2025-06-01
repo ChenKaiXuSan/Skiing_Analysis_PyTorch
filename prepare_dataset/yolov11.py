@@ -51,6 +51,7 @@ class MultiPreprocess:
 
         self.img_size = configs.YOLO.img_size
 
+        self.save = configs.YOLO.save
         self.save_path = Path(configs.extract_dataset.save_path) / "vis"
         self.batch_size = configs.batch_size
 
@@ -102,18 +103,10 @@ class MultiPreprocess:
                     )
 
                 for r in results:
-
-                    if r.boxes and r.boxes.is_track:
-                        boxes = r.boxes.xywh.cpu()
-                        track_ids = r.boxes.id.int().cpu().tolist()
-
-                        for box, track_id in zip(boxes, track_ids):
-                            x, y, w, h = box
-                            track = track_history[track_id]
-                            track.append([float(x), float(y)])
-
+                    
                     # judge if have keypoints.
                     # one_batch_keypoint.append(r.keypoints.data) # 1, 17, 3
+                    # FIXME: when person > 1, the keypoints will be lost.
                     if list(r.keypoints.xyn.shape) != [1, 17, 2]:
                         none_index.append(frame)
                         one_batch_keypoint[frame] = None
@@ -353,7 +346,6 @@ class MultiPreprocess:
             vframes_numpy, one_batch_bbox_Dict, one_bbox_none_index
         )
 
-        self.save_result(one_bbox_res_list, video_path, "bbox")
 
         # * process mask
         one_batch_mask_Dict, one_mask_none_index, one_mask_res_list = (
@@ -363,7 +355,6 @@ class MultiPreprocess:
             vframes_numpy, one_batch_mask_Dict, one_mask_none_index
         )
 
-        self.save_result(one_mask_res_list, video_path, "mask")
 
         # * process keypoint
         (
@@ -379,7 +370,13 @@ class MultiPreprocess:
             vframes_numpy, one_batch_keypoint_score_Dict, one_pose_none_index
         )
 
-        self.save_result(one_pose_res_list, video_path, "pose")
+        # * save the result to img 
+        if self.save:
+            self.save_result(one_bbox_res_list, video_path, "bbox")
+            self.save_result(one_mask_res_list, video_path, "mask")
+            self.save_result(one_pose_res_list, video_path, "pose")
+
+        track_history = self.save_track_history(one_pose_res_list)
 
         # TODO: 这里的逻辑可以修改一下，这些操作是不需要的
         pred_bbox_list.append(torch.stack(one_batch_bbox, dim=0).squeeze())  # t, cxcywh
@@ -401,6 +398,23 @@ class MultiPreprocess:
             torch.stack(pred_keypoint_list, dim=0),  # b, t, keypoint, value
             torch.stack(pred_keypoint_score_list, dim=0),  # b, t, keypoint, value
         )
+
+
+    def save_track_history(self, res_list: list):
+        
+        track_history = defaultdict(lambda: [])
+        # * save the track history
+        for r in res_list:
+            if r.boxes and r.boxes.is_track:
+                boxes = r.boxes.xywh.cpu()
+                track_ids = r.boxes.id.int().cpu().tolist()
+
+                for box, track_id in zip(boxes, track_ids):
+                    x, y, w, h = box
+                    track = track_history[track_id]
+                    track.append([float(x), float(y)])
+
+        return track_history
 
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 

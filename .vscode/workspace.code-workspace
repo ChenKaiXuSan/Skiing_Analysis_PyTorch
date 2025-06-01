@@ -8,5 +8,8 @@
 			"name": "dataset",
 			"path": "/workspace/data"
 		}
+		{
+			"path": "/workspace/VideoPose3D"
+		}
 	]
 }

@@ -9,11 +9,12 @@ YOLO:
   pose_ckpt: "/workspace/code/ckpt/yolo11x-pose.pt"
   seg_ckpt: "/workspace/code/ckpt/yolo11x-seg.pt"
   bbox_ckpt: "/workspace/code/ckpt/yolo11x.pt"
-  conf: 0.8
+  conf: 0.5
   iou: 0.5
   verbose: False
   img_size: 640
   tracking: true
+  save: true
 
 depth_estimator:
   dpt_processor_path: "/workspace/code/ckpt/"

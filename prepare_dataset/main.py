@@ -96,7 +96,8 @@ def process(parames, person: str):
         save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
 
         # merge the frame into video
-        merge_frame_to_video(SAVE_PATH, person, one_video.stem)
+        if parames.YOLO.save:
+            merge_frame_to_video(SAVE_PATH, person, one_video.stem)
 
 
 def merge_frame_to_video(save_path: Path, person: str, video_name: str):
