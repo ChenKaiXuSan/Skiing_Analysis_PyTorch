@@ -38,7 +38,7 @@ class Preprocess:
 
         self.task = config.task
 
-        if ["pose", "bbox", "mask"] == self.task:
+        if "pose" in self.task or "bbox" in self.task or "mask" in self.task:
             self.yolo_model = MultiPreprocess(config)
 
         if "depth" in self.task:

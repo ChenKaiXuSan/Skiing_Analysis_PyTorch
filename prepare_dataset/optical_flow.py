@@ -32,8 +32,10 @@ from torchvision.io import write_png
 from torchvision.utils import flow_to_image
 from torchvision.models.optical_flow import Raft_Large_Weights, raft_large, raft_small
 
-from prepare_dataset.yolov11 import MultiPreprocess
-from prepare_dataset.depth_estimation import DepthEstimator
+# TODO: should save the ckpt to path.
+
+
+logger = logging.getLogger(__name__)
 
 
 class OpticalFlow(nn.Module):
@@ -106,7 +108,7 @@ class OpticalFlow(nn.Module):
             nn.Tensor: stacked predict optical flow, (b, 2, f, h, w)
         """
 
-        b, c, f, h, w = batch.shape
+        f, h, w, c = batch.shape
 
         pred_optical_flow_list = []
 

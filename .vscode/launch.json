@@ -13,6 +13,10 @@
       "module": "prepare_dataset.main",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
+      "args": [
+        "--task",
+        "optical_flow",
+      ]
     },
     {
       "name": "convert_frame_video",
