@@ -14,7 +14,7 @@ YOLO:
   verbose: False
   img_size: 640
   tracking: true
-  save: false
+  save: true
 
 depth_estimator:
   dpt_processor_path: "/workspace/code/ckpt/"
@@ -28,7 +28,8 @@ extract_dataset:
   data_path: "/workspace/data/raw" # this is raw data path.
   save_path: "/workspace/data/" # this is extracted video path.
 
-OF: true
+optical_flow:
+  save: true
 
 batch_size: 30
 device: 1

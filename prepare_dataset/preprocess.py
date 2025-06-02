@@ -40,12 +40,18 @@ class Preprocess:
 
         if "pose" in self.task or "bbox" in self.task or "mask" in self.task:
             self.yolo_model = MultiPreprocess(config)
+        else:
+            self.yolo_model = None
 
         if "depth" in self.task:
             self.depth_estimator = DepthEstimator(config)
+        else:
+            self.depth_estimator = None
 
         if "optical_flow" in self.task:
             self.of_model = OpticalFlow(config)
+        else:
+            self.of_model = None
 
     # def shape_check(self, check: list):
     #     """
@@ -85,30 +91,31 @@ class Preprocess:
     #             raise ValueError("shape not match")
 
     def __call__(self, vframes: torch.tensor, video_path: Path):
-        """
-        forward preprocess method for one batch.
 
-        Args:
-            batch (torch.tensor): batch imgs, (b, c, t, h, w)
-            batch_idx (int): epoch index.
-
-        Returns:
-            list: list for different moddailty, return video, bbox_non_index, labels, bbox, mask, pose
-        """
-        # TODO：want to use this to control the preprocess flow.
         # * process depth
         if self.depth_estimator:
             depth = self.depth_estimator(vframes, video_path)
+        else:
+            depth = None
+
+        # * process optical flow
+        if self.of_model:
+            optical_flow = self.of_model(vframes, video_path)
+        else:
+            optical_flow = None
 
         # * process mask, pose, bbox
         if self.yolo_model:
             video, bbox_none_index, bbox, mask, pose, pose_score = self.yolo_model(
                 vframes, video_path
             )
-
-        # * process optical flow
-        if self.of_model:
-            optical_flow = self.of_model(vframes)
+        else:
+            video = vframes
+            bbox_none_index = None
+            bbox = None
+            mask = None
+            pose = None
+            pose_score = None
 
         # shape check
         # self.shape_check([video, mask, bbox, pose, optical_flow])

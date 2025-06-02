@@ -27,8 +27,7 @@ import logging
 from pathlib import Path
 import hydra
 from torchvision.io import read_video
-
-
+ 
 from utils.utils import save_to_pt, merge_frame_to_video
 
 from prepare_dataset.preprocess import Preprocess
@@ -70,11 +69,11 @@ def process(parames, person: str):
 
         # * save the video frames keypoint
         sample_json_info = {
-            "video_name": one_video.name,
+            "frames": vframes.cpu(),  # THWC
+            "video_name": one_video.stem,
             "video_path": str(one_video),
             "img_shape": (vframes.shape[1], vframes.shape[2]),
             "frame_count": vframes.shape[0],
-            "frames": vframes.cpu(),  # THWC
             "none_index": bbox_none_index,
             "bbox": bbox.cpu(),  # xywh
             "mask": mask.cpu(),
@@ -90,11 +89,6 @@ def process(parames, person: str):
 
         # * save the video frames to json file
         save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
-
-        # merge the frame into video
-        if parames.YOLO.save:
-            merge_frame_to_video(SAVE_PATH, person, one_video.stem)
-
 
 @hydra.main(config_path="../configs/", config_name="prepare_dataset", version_base=None)
 def main(parames):

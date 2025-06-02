@@ -20,17 +20,19 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
-import shutil
 import logging
 from pathlib import Path
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from torchvision.io import write_png
 from torchvision.utils import flow_to_image
-from torchvision.models.optical_flow import Raft_Large_Weights, raft_large, raft_small
+from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
+
+
+from utils.utils import merge_frame_to_video
+from torchvision.io import write_png
 
 # TODO: should save the ckpt to path.
 
@@ -49,6 +51,9 @@ class OpticalFlow(nn.Module):
         # define the network
         self.model = raft_large(weights=self.weights, progress=False).to(self.device)
 
+        self.save = param.optical_flow.save
+        self.save_path = Path(param.extract_dataset.save_path)
+
     def get_Optical_flow(self, frame_batch):
         """
         catch one by one batch optical flow, use RAFT method.
@@ -60,11 +65,11 @@ class OpticalFlow(nn.Module):
             tensor: one batch pred optical flow
         """
 
-        c, f, h, w = frame_batch.shape
+        f, h, w, c = frame_batch.shape
 
-        frame_batch = frame_batch.permute(1, 0, 2, 3).to(
+        frame_batch = frame_batch.permute(0, 3, 1, 2).to(
             self.device
-        )  # c, f, h, w to f, c, h, w
+        )  # f, h, w, c to f, c, h, w
 
         # prepare the img
         current_frame = frame_batch[:-1, :, :, :]  # 0~-1 frame
@@ -75,17 +80,17 @@ class OpticalFlow(nn.Module):
         pred_flows = []
 
         interval = (
-            10  # the interval for the OF model predict, because the model is too large.
+            2  # the interval for the OF model predict, because the model is too large.
         )
 
         with torch.no_grad():
-            for i in range(0, f, interval):
+            for i in tqdm(range(0, f, interval), desc="Predict optical flow"):
 
-                # todo: maybe under scalse the img size.
                 # transforms
                 current_frame_batch, next_frame_batch = self.transforms(
                     current_frame[i : i + interval], next_frame[i : i + interval]
                 )
+
                 temp_pred_flows = self.model(
                     current_frame_batch,
                     next_frame_batch,
@@ -97,7 +102,25 @@ class OpticalFlow(nn.Module):
 
         return torch.cat(pred_flows, dim=0)  # f, c, h, w
 
-    def __call__(self, frames: torch.Tensor) -> torch.Tensor:
+    def save_image(self, flow: torch.Tensor, video_path: Path):
+        """
+        Save the optical flow image to the specified path.
+        """
+        person = video_path.parts[-2]
+        video_name = video_path.stem
+
+        _save_path = Path(self.save_path) / "vis" / "optical_flow" / person / video_name
+        if not _save_path.exists():
+            _save_path.mkdir(parents=True, exist_ok=True)
+
+        f, c, h, w = flow.shape
+
+        for i in tqdm(range(f), desc="Save optical flow", leave=False):
+
+            flow_img = flow_to_image(flow[i])
+            write_png(flow_img.cpu(), str(_save_path / f"{i}_flow.png"))
+
+    def __call__(self, frames: torch.Tensor, video_path: Path) -> torch.Tensor:
         """
         predict one batch optical flow.
 
@@ -108,15 +131,13 @@ class OpticalFlow(nn.Module):
             nn.Tensor: stacked predict optical flow, (b, 2, f, h, w)
         """
 
-        f, h, w, c = frames.shape
+        _pred_flow = self.get_Optical_flow(frames)  # f, c, h, w
 
-        pred_optical_flow_list = []
+        if self.save:
+            self.save_image(_pred_flow, video_path)
 
-        one_batch_pred_flow = self.get_Optical_flow(
-            frames
-        )  # f, c, h, w
-        pred_optical_flow_list.append(one_batch_pred_flow)
+            merge_frame_to_video(
+                self.save_path, video_path.parts[-2], video_path.stem, "optical_flow"
+            )
 
-        return torch.stack(pred_optical_flow_list).permute(
-            0, 2, 1, 3, 4
-        )  # b, c, f, h, w
+        return _pred_flow.permute(0, 2, 3, 1)

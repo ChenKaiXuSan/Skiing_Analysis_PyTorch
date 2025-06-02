@@ -31,7 +31,8 @@ import numpy as np
 from PIL import Image
 from ultralytics import YOLO
 
-from utils.utils import merge_frame_to_video, clip_pad_with_bbox
+from utils.utils import merge_frame_to_video
+from utils.utils import clip_pad_with_bbox
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class MultiPreprocess:
         self.img_size = configs.YOLO.img_size
 
         self.save = configs.YOLO.save
-        self.save_path = Path(configs.extract_dataset.save_path) / "vis"
+        self.save_path = Path(configs.extract_dataset.save_path)
         self.batch_size = configs.batch_size
 
     def get_YOLO_pose_result(self, frame_batch: np.ndarray):
@@ -105,7 +106,7 @@ class MultiPreprocess:
                     )
 
                 for r in results:
-                    
+
                     # judge if have keypoints.
                     # one_batch_keypoint.append(r.keypoints.data) # 1, 17, 3
                     # FIXME: when person > 1, the keypoints will be lost.
@@ -121,22 +122,47 @@ class MultiPreprocess:
 
         return one_batch_keypoint, none_index, one_batch_keypoint_score, res_list
 
-    def save_result(self, r, video_path: Path, flag: str = "pose"):
-        
+    def save_image(self, r, video_path: Path, flag: str = "pose"):
+
         # TODO: save the crop img for after process.
         person = video_path.parts[-2]
         video_name = video_path.stem
 
-        _save_path = self.save_path / flag / person / video_name
+        _save_path = self.save_path / "vis" / flag / person / video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
 
         for i, res in tqdm(
-            enumerate(r), total=len(r), desc=f"Save Result-{flag}", leave=False
+            enumerate(r), total=len(r), desc=f"Save image-{flag}", leave=False
         ):
 
             img = Image.fromarray(res.plot())
             img.save(_save_path / f"{i}_{flag}.png")
+
+    def save_crop_image(self, r, video_path: Path, flag: str = "pose"):
+        """
+        save_crop_image, save the crop image for pose or bbox.
+
+        Args:
+            r (list): results from YOLO model.
+            video_path (Path): video path for save.
+            flag (str, optional): flag for save. Defaults to "pose".
+        """
+
+        person = video_path.parts[-2]
+        video_name = video_path.stem
+
+        _save_path = self.save_path / "vis" / flag / person / video_name
+        if not _save_path.exists():
+            _save_path.mkdir(parents=True, exist_ok=True)
+
+        for i, res in tqdm(
+            enumerate(r), total=len(r), desc=f"Save crop image-{flag}", leave=False
+        ):
+            res.crop = clip_pad_with_bbox(
+                res.original_img, res.boxes.xyxy[0].cpu().numpy(), self.img_size
+            )
+            res.save(save_dir=str(_save_path), save_name=f"{i}_{flag}_crop.png")
 
     def get_YOLO_mask_result(self, frame_batch: np.ndarray):
         """
@@ -198,7 +224,7 @@ class MultiPreprocess:
 
         return one_batch_mask, none_index, res_list
 
-    def get_YOLO_bbox_result(self, frame_batch: np.ndarray):
+    def get_YOLO_bbox_result(self, frame_list_bgr: list[np.ndarray]):
         """
         get_YOLO_mask_result, from frame_batch, for mask.
 
@@ -209,56 +235,64 @@ class MultiPreprocess:
             dict, list: two return values, with one batch mask in Dict, and none index in list.
         """
 
-        t, h, w, c = frame_batch.shape
-
         one_batch_bbox = {}
         none_index = []
         res_list = []
 
-        with torch.no_grad():
-            for frame in tqdm(range(t), desc="YOLO BBox", leave=False):
-                if self.tracking:
-                    track_history = defaultdict(lambda: [])
+        if self.tracking:
+            track_history = defaultdict(lambda: [])
 
-                    results = self.yolo_bbox.track(
-                        source=frame_batch[frame],
-                        conf=self.conf,
-                        iou=self.iou,
-                        save_crop=False,
-                        classes=0,
-                        vid_stride=True,
-                        stream=False,
-                        verbose=self.verbose,
-                        device=self.device,
-                    )
-                else:
+            results = self.yolo_bbox.track(
+                source=frame_list_bgr,
+                conf=self.conf,
+                iou=self.iou,
+                classes=0,
+                vid_stride=True,
+                stream=True,
+                verbose=self.verbose,
+                device=self.device,
+                save=True,
+                save_frames=True,
+                save_conf=True,
+                save_crop=True,
+                project=self.save_path / "vis",
+                name="bbox"
+            )
+        else:
 
-                    results = self.yolo_bbox(
-                        source=frame_batch[frame],
-                        conf=self.conf,
-                        iou=self.iou,
-                        save_crop=False,
-                        classes=0,
-                        vid_stride=True,
-                        stream=False,
-                        verbose=self.verbose,
-                        device=self.device,
-                    )
+            results = self.yolo_bbox.predict(
+                source=frame_list_bgr,
+                conf=self.conf,
+                iou=self.iou,
+                classes=0,
+                vid_stride=True,
+                stream=True,
+                verbose=self.verbose,
+                device=self.device,
+                save=True,
+                save_frames=True,
+                save_conf=True,
+                save_crop=True,
+                project=self.save_path / "vis" / "bbox",
+            )
 
-                for r in results:
-                    
-                    # judge if have bbox.
-                    if r.boxes is None or r.boxes.shape[0] == 0:
-                        none_index.append(frame)
-                        one_batch_bbox[frame] = None
-                    elif list(r.boxes.xywh.shape) == [1, 4]:
-                        one_batch_bbox[frame] = r.boxes.xywh  # 1, 4, xywh
-                    else:
-                        # when mask > 2, just use the first mask.
-                        # ? sometime will get two type for bbox.
-                        one_batch_bbox[frame] = r.boxes.xywh[:1, ...]  # 1, 4
+        for idx, r in tqdm(
+            enumerate(results), total=len(frame_list_bgr), desc="YOLO BBox", leave=False
+        ):
+            
 
-                    res_list.append(r)
+            # # judge if have bbox.
+            # if r.boxes is None or r.boxes.shape[0] == 0:
+            #     none_index.append(frame)
+            #     one_batch_bbox[frame] = None
+            # elif list(r.boxes.xywh.shape) == [1, 4]:
+            #     one_batch_bbox[frame] = r.boxes.xywh  # 1, 4, xywh
+            # else:
+            #     # when mask > 2, just use the first mask.
+            #     # ? sometime will get two type for bbox.
+            #     one_batch_bbox[frame] = r.boxes.xywh[:1, ...]  # 1, 4
+
+            res_list.append(r)
 
         return one_batch_bbox, none_index, res_list
 
@@ -349,7 +383,6 @@ class MultiPreprocess:
             vframes_numpy, one_batch_bbox_Dict, one_bbox_none_index
         )
 
-
         # * process mask
         one_batch_mask_Dict, one_mask_none_index, one_mask_res_list = (
             self.get_YOLO_mask_result(vframes_numpy)
@@ -357,7 +390,6 @@ class MultiPreprocess:
         one_batch_mask, _ = self.process_none(
             vframes_numpy, one_batch_mask_Dict, one_mask_none_index
         )
-
 
         # * process keypoint
         (
@@ -373,11 +405,38 @@ class MultiPreprocess:
             vframes_numpy, one_batch_keypoint_score_Dict, one_pose_none_index
         )
 
-        # * save the result to img 
+        # * save the result to img
         if self.save:
-            self.save_result(one_bbox_res_list, video_path, "bbox")
-            self.save_result(one_mask_res_list, video_path, "mask")
-            self.save_result(one_pose_res_list, video_path, "pose")
+
+            # save the crop image for bbox, mask, pose
+            # self.save_crop_image(one_bbox_res_list, video_path, "bbox")
+            # self.save_crop_image(one_mask_res_list, video_path, "mask")
+            # self.save_crop_image(one_pose_res_list, video_path, "pose")
+
+            # save the image for bbox, mask, pose
+            self.save_image(one_bbox_res_list, video_path, "bbox")
+            self.save_image(one_mask_res_list, video_path, "mask")
+            self.save_image(one_pose_res_list, video_path, "pose")
+
+            # save the video frames to video file
+            merge_frame_to_video(
+                self.save_path,
+                person=video_path.parts[-2],
+                video_name=video_path.stem,
+                flag="bbox",
+            )
+            merge_frame_to_video(
+                self.save_path,
+                person=video_path.parts[-2],
+                video_name=video_path.stem,
+                flag="mask",
+            )
+            merge_frame_to_video(
+                self.save_path,
+                person=video_path.parts[-2],
+                video_name=video_path.stem,
+                flag="pose",
+            )
 
         track_history = self.save_track_history(one_pose_res_list)
 
@@ -402,9 +461,8 @@ class MultiPreprocess:
             torch.stack(pred_keypoint_score_list, dim=0),  # b, t, keypoint, value
         )
 
-
     def save_track_history(self, res_list: list):
-        
+
         track_history = defaultdict(lambda: [])
         # * save the track history
         for r in res_list:
@@ -423,9 +481,30 @@ class MultiPreprocess:
 
         t, h, w, c = vframes.shape
 
-        video, bbox_none_index, bbox, mask, keypoint, keypoint_score = (
-            self.process_batch(vframes, video_path)
+        vframes_numpy = vframes.numpy()
+        vframes_bgr = vframes_numpy[:, :, :, ::-1]
+        frame_list_bgr = [ img for img in vframes_bgr]
+
+
+        # * process bbox
+        one_batch_bbox_Dict, one_bbox_none_index, one_bbox_res_list = (
+            self.get_YOLO_bbox_result(frame_list_bgr)
         )
+
+        # * save the result to img
+        if self.save:
+            # TODO: save the crop image for bbox, mask, pose
+            # save the video frames to video file
+            merge_frame_to_video(
+                self.save_path,
+                person=video_path.parts[-2],
+                video_name=video_path.stem,
+                flag="bbox",
+            )
+
+        # video, bbox_none_index, bbox, mask, keypoint, keypoint_score = (
+        #     self.process_batch(vframes, video_path)
+        # )
 
         # shape check
         # assert video.shape == batch.shape
