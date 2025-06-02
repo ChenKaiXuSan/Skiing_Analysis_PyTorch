@@ -108,7 +108,7 @@ class Preprocess:
 
         # * process optical flow
         if self.of_model:
-            optical_flow = self.of_model.process_batch(vframes)
+            optical_flow = self.of_model(vframes)
 
         # shape check
         # self.shape_check([video, mask, bbox, pose, optical_flow])

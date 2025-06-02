@@ -74,6 +74,7 @@ def process(parames, person: str):
             "video_path": str(one_video),
             "img_shape": (vframes.shape[1], vframes.shape[2]),
             "frame_count": vframes.shape[0],
+            "frames": vframes.cpu(),  # THWC
             "none_index": bbox_none_index,
             "bbox": bbox.cpu(),  # xywh
             "mask": mask.cpu(),

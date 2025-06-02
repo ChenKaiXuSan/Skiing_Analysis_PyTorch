@@ -97,7 +97,7 @@ class OpticalFlow(nn.Module):
 
         return torch.cat(pred_flows, dim=0)  # f, c, h, w
 
-    def process_batch(self, batch):
+    def __call__(self, frames: torch.Tensor) -> torch.Tensor:
         """
         predict one batch optical flow.
 
@@ -108,15 +108,14 @@ class OpticalFlow(nn.Module):
             nn.Tensor: stacked predict optical flow, (b, 2, f, h, w)
         """
 
-        f, h, w, c = batch.shape
+        f, h, w, c = frames.shape
 
         pred_optical_flow_list = []
 
-        for batch_index in range(b):
-            one_batch_pred_flow = self.get_Optical_flow(
-                batch[batch_index]
-            )  # f, c, h, w
-            pred_optical_flow_list.append(one_batch_pred_flow)
+        one_batch_pred_flow = self.get_Optical_flow(
+            frames
+        )  # f, c, h, w
+        pred_optical_flow_list.append(one_batch_pred_flow)
 
         return torch.stack(pred_optical_flow_list).permute(
             0, 2, 1, 3, 4

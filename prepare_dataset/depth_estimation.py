@@ -28,7 +28,7 @@ import torch
 import numpy as np
 from PIL import Image
 
-from utils.utils import save_to_pt, merge_frame_to_video
+from utils.utils import merge_frame_to_video
 
 
 class DepthEstimator:
