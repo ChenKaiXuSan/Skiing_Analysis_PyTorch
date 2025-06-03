@@ -162,6 +162,21 @@ class YOLOv11Bbox:
                     track.append([float(x), float(y)])
 
         return track_history
+    
+    # TODO: use id to track the bbox
+    # if the id bbox is large enough, we use the close bbox to track the person.
+    def track_bbox(self, track_dict: dict):
+
+        final_bbox = {}
+
+        for frame, track_info in track_dict.items():
+            track_ids = track_info["id"]
+            track_bboxes = track_info["bbox"]
+
+            for box, track_id in zip(track_bboxes, track_ids):
+                x, y, w, h = box
+                
+            
 
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 
@@ -179,6 +194,11 @@ class YOLOv11Bbox:
         batch_bbox = {}
         res_list = []
 
+        track_dict = {}
+        track_id_list = []
+        track_bbox_list = []
+    
+
         vframes_numpy = vframes.numpy()
         vframes_bgr = vframes_numpy[:, :, :, ::-1]
         frame_list_bgr = [ img for img in vframes_bgr]
@@ -192,10 +212,25 @@ class YOLOv11Bbox:
             enumerate(results), total=len(frame_list_bgr), desc="YOLO BBox", leave=False
         ):
 
+            # save the id and body center for tracking.
+            if r.boxes and r.boxes.is_track:
+                boxes = r.boxes.xywh.cpu()
+                track_ids = r.boxes.id.int().cpu().tolist()
+
+                track_dict[idx] = {
+                    "id": track_ids,
+                    "bbox": boxes,
+                }
+
+                
             # judge if have bbox.
             if r.boxes is None or r.boxes.shape[0] == 0:
                 none_index.append(idx)
                 batch_bbox[idx] = torch.tensor([])  # empty tensor
+
+            elif r.boxes.shape[0] > 1:
+                # if have more than one bbox, we use the first one.
+                batch_bbox[idx] = r.boxes.xywh[0]
             else:
                 batch_bbox[idx] = r.boxes.xywh  # n, 4
 
@@ -203,6 +238,9 @@ class YOLOv11Bbox:
             r.save_crop(save_dir=str(_save_crop_path), file_name=f"{idx}_bbox_crop.png")
 
             res_list.append(r)
+
+        # find the track id 
+        self.track_bbox(track_dict)
 
         # * save the result to img
         if self.save:
