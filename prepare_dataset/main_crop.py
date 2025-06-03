@@ -28,8 +28,6 @@ from pathlib import Path
 import hydra
 from torchvision.io import read_video
  
-from utils.utils import save_to_pt, merge_frame_to_video
-
 from prepare_dataset.preprocess import Preprocess
 
 
@@ -50,44 +48,12 @@ def process(parames, person: str):
 
     for one_video in one_person.iterdir():
 
-        res = {}
-
         vframes, _, info = read_video(one_video, pts_unit="sec", output_format="THWC")
 
         # * use preprocess to get information.
-        # the format is: final_frames, bbox_none_index, label, optical_flow, bbox, mask, pose
-        (
-            bbox_none_index,
-            optical_flow,
-            bbox,
-            mask,
-            keypoints,
-            keypoints_score,
-            depth,
-        ) = preprocess(vframes, one_video)
+        bbox, bbox_none_idx, bbox_res_list = preprocess.yolo_model_bbox(vframes, one_video)
 
-        # * save the video frames keypoint
-        sample_json_info = {
-            "frames": vframes.cpu(),  # THWC
-            "video_name": one_video.stem,
-            "video_path": str(one_video),
-            "img_shape": (vframes.shape[1], vframes.shape[2]),
-            "frame_count": vframes.shape[0],
-            "none_index": bbox_none_index,
-            "bbox": bbox.cpu(),  # xywh
-            "mask": mask.cpu(),
-            "optical_flow": optical_flow.cpu(),
-            "depth": depth.cpu(),
-            "keypoint": {
-                "keypoint": keypoints.cpu(),  # xyn
-                "keypoint_score": keypoints_score.cpu(),
-            },
-        }
-
-        res[one_video.name] = sample_json_info
-
-        # * save the video frames to json file
-        save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
+        logger.info(f"Finish the bbox detection for {one_video.name}")
 
 @hydra.main(config_path="../configs/", config_name="prepare_dataset", version_base=None)
 def main(parames):

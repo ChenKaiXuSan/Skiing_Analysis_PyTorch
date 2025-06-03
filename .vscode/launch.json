@@ -15,9 +15,21 @@
       "console": "integratedTerminal",
       "args": [
         // "task=[optical_flow,depth]",
-        "task=[mask]"
+        "task=[bbox]"
       ]
     },
+    {
+      "name": "prepare_dataset_crop",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "prepare_dataset.main_crop",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+        // "task=[optical_flow,depth]",
+        "task=[bbox]"
+      ]
+    }
     {
       "name": "convert_frame_video",
       "type": "debugpy",
