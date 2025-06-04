@@ -163,7 +163,7 @@ def save_to_json(sample_info: dict, save_path: Path, person: str) -> None:
         logger.info(f"Save the {v['video_name']} to {save_path_with_name}")
 
 
-def save_to_pt(one_video:Path, save_path: Path, pt_info: dict[torch.Tensor]) -> None:
+def save_to_pt(one_video: Path, save_path: Path, pt_info: dict[torch.Tensor]) -> None:
     """save the sample info to json file.
 
     Args:
@@ -182,3 +182,32 @@ def save_to_pt(one_video:Path, save_path: Path, pt_info: dict[torch.Tensor]) -> 
     torch.save(pt_info, save_path_with_name)
 
     logger.info(f"Save the {video_name} to {save_path_with_name}")
+
+
+def process_none(batch_Dict: dict[torch.Tensor], none_index: list):
+    """
+    process_none, where from batch_Dict to instead the None value with next frame tensor (or froward frame tensor).
+
+    Args:
+        batch_Dict (dict): batch in Dict, where include the None value when yolo dont work.
+        none_index (list): none index list map to batch_Dict, here not use this.
+
+    Returns:
+        list: list include the replace value for None value.
+    """
+
+    boundary = len(batch_Dict) - 1 
+    filter_batch = batch_Dict.copy()
+
+    for i in none_index:
+
+        # * if the index is None, we need to replace it with next frame.
+        if batch_Dict[i] is None:
+            next_idx = i + 1
+
+            if next_idx < boundary:
+                filter_batch[i] = batch_Dict[next_idx]
+            else:
+                filter_batch[i] = batch_Dict[boundary]
+
+    return filter_batch

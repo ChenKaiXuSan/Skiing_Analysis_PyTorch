@@ -93,10 +93,11 @@ class OpticalFlow(nn.Module):
                     current_frame_batch,
                     next_frame_batch,
                 )[-1]
-                pred_flows.append(temp_pred_flows)
+                pred_flows.append(temp_pred_flows.cpu())
 
         # empty cache
         torch.cuda.empty_cache()
+        del frame_batch
 
         return torch.cat(pred_flows, dim=0)  # f, c, h, w
 
@@ -131,6 +132,8 @@ class OpticalFlow(nn.Module):
 
         _pred_flow = self.get_Optical_flow(frames)  # f, c, h, w
 
+        del self.model
+        
         if self.save:
             self.save_image(_pred_flow, video_path)
 

@@ -29,7 +29,7 @@ import logging
 import numpy as np
 from ultralytics import YOLO
 
-from utils.utils import merge_frame_to_video
+from utils.utils import merge_frame_to_video, process_none
 
 logger = logging.getLogger(__name__)
 
@@ -107,28 +107,22 @@ class YOLOv11Pose:
             # judge if have bbox.
             if r.boxes is None or r.boxes.shape[0] == 0:
                 none_index.append(idx)
-                bbox_dict[idx] = torch.tensor([])  # empty tensor
-                pose_dict[idx] = torch.tensor([])  # empty tensor
-                pose_dict_score[idx] = torch.tensor([])  # empty tensor
+                bbox_dict[idx] = None
+                pose_dict[idx] = None
+                pose_dict_score[idx] = None
 
             elif r.boxes.shape[0] == 1:
                 # if have only one bbox, we use the first one.
                 bbox_dict[idx] = r.boxes.xywh[0]
-                pose_dict[idx] = r.keypoints.xyn[0] if r.keypoints else torch.tensor([])
-                pose_dict_score[idx] = (
-                    r.keypoints.conf[0] if r.keypoints else torch.tensor([])
-                )
+                pose_dict[idx] = r.keypoints.xyn[0]
+                pose_dict_score[idx] = r.keypoints.conf[0]
 
             elif r.boxes.shape[0] > 1:
                 if idx == 0:
                     # if the first frame, we just use the first bbox.
                     bbox_dict[idx] = r.boxes.xywh[0]
-                    pose_dict[idx] = (
-                        r.keypoints.xyn[0] if r.keypoints else torch.tensor([])
-                    )
-                    pose_dict_score[idx] = (
-                        r.keypoints.conf[0] if r.keypoints else torch.tensor([])
-                    )
+                    pose_dict[idx] = r.keypoints.xyn[0]
+                    pose_dict_score[idx] = r.keypoints.conf[0]
 
                     continue
 
@@ -155,16 +149,8 @@ class YOLOv11Pose:
                     closest_idx = np.argmin(distance_list)
                     closest_box = boxes[closest_idx]
                     bbox_dict[idx] = closest_box
-                    pose_dict[idx] = (
-                        r.keypoints.xyn[closest_idx]
-                        if r.keypoints
-                        else torch.tensor([])
-                    )
-                    pose_dict_score[idx] = (
-                        r.keypoints.conf[closest_idx]
-                        if r.keypoints
-                        else torch.tensor([])
-                    )
+                    pose_dict[idx] = r.keypoints.xyn[closest_idx]
+                    pose_dict_score[idx] = r.keypoints.conf[closest_idx]
 
             else:
                 ValueError(
@@ -183,6 +169,16 @@ class YOLOv11Pose:
                 video_name=video_path.stem,
                 flag="pose",
             )
+
+        # * process none index
+        if len(none_index) > 0:
+            logger.warning(
+                f"the {video_path} has {len(none_index)} frames without pose, please check the results."
+            )
+            # process none index, where from bbox_dict to instead the None value with next frame tensor (or froward frame tensor).
+            pose = process_none(batch_Dict=pose_dict, none_index=none_index)
+            pose_score = process_none(batch_Dict=pose_dict_score, none_index=none_index)
+            # bbox_dict = process_none(batch_Dict=bbox_dict, none_index=none_index)
 
         # convert dict to tensor
         pose = torch.stack([pose_dict[k] for k in sorted(pose_dict.keys())], dim=0)

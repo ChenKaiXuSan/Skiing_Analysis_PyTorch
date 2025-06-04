@@ -29,7 +29,7 @@ import logging
 import numpy as np
 from ultralytics import YOLO
 
-from utils.utils import merge_frame_to_video
+from utils.utils import merge_frame_to_video, process_none
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ class YOLOv11Bbox:
             # judge if have bbox.
             if r.boxes is None or r.boxes.shape[0] == 0:
                 none_index.append(idx)
-                bbox_dict[idx] = torch.tensor([])  # empty tensor
+                bbox_dict[idx] = None
 
             elif r.boxes.shape[0] == 1:
                 # if have only one bbox, we use the first one.
@@ -178,9 +178,17 @@ class YOLOv11Bbox:
                 flag="bbox",
             )
 
+        # * process none index
+        if len(none_index) > 0:
+            logger.warning(
+                f"the {video_path.stem} has {len(none_index)} frames without bbox."
+            )
+            bbox_dict = process_none(bbox_dict, none_index)
+
         # convert bbox_dict to tensor
         bbox = torch.stack(
-            [bbox_dict[i] for i in range(len(bbox_dict)) if i not in none_index], dim=0
+            [bbox_dict[k] for k in sorted(bbox_dict.keys())],
+            dim=0,
         )
 
         return bbox, none_index, results

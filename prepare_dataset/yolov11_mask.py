@@ -29,7 +29,7 @@ import logging
 import numpy as np
 from ultralytics import YOLO
 
-from utils.utils import merge_frame_to_video
+from utils.utils import merge_frame_to_video, process_none
 
 logger = logging.getLogger(__name__)
 
@@ -107,19 +107,19 @@ class YOLOv11Mask:
             # judge if have bbox.
             if r.boxes is None or r.boxes.shape[0] == 0:
                 none_index.append(idx)
-                bbox_dict[idx] = torch.tensor([])  # empty tensor
-                mask_dict[idx] = torch.tensor([])  # empty tensor
+                bbox_dict[idx] = None  # empty tensor
+                mask_dict[idx] = None  # empty tensor
 
             elif r.boxes.shape[0] == 1:
                 # if have only one bbox, we use the first one.
                 bbox_dict[idx] = r.boxes.xywh[0]
-                mask_dict[idx] = r.masks.data[0] if r.masks else torch.tensor([])
+                mask_dict[idx] = r.masks.data[0]
 
             elif r.boxes.shape[0] > 1:
                 if idx == 0:
                     # if the first frame, we just use the first bbox.
                     bbox_dict[idx] = r.boxes.xywh[0]
-                    mask_dict[idx] = r.masks.data[0] if r.masks else torch.tensor([])
+                    mask_dict[idx] = r.masks.data[0]
 
                     continue
 
@@ -146,9 +146,7 @@ class YOLOv11Mask:
                     closest_idx = np.argmin(distance_list)
                     closest_box = boxes[closest_idx]
                     bbox_dict[idx] = closest_box
-                    mask_dict[idx] = (
-                        r.masks.data[closest_idx] if r.masks else torch.tensor([])
-                    )
+                    mask_dict[idx] = r.masks.data[closest_idx]
 
             else:
                 ValueError(
@@ -167,6 +165,12 @@ class YOLOv11Mask:
                 video_name=video_path.stem,
                 flag="mask",
             )
+        # process none index
+        if len(none_index) > 0:
+            logger.warning(
+                f"the {video_path.stem} has {len(none_index)} frames without bbox."
+            )
+            mask_dict = process_none(mask_dict, none_index)
 
         # convert dict to tensor
         mask = torch.stack([mask_dict[k] for k in sorted(mask_dict.keys())], dim=0)
