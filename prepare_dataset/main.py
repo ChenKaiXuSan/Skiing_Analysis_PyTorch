@@ -26,8 +26,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import hydra
+
+import torch
 from torchvision.io import read_video
- 
+
 from utils.utils import save_to_pt, merge_frame_to_video
 
 from prepare_dataset.preprocess import Preprocess
@@ -84,6 +86,9 @@ def process(parames, person: str):
 
         # * save the video frames to json file
         save_to_pt(one_video, SAVE_PATH, pt_info)
+
+        torch.cuda.empty_cache()
+
 
 @hydra.main(config_path="../configs/", config_name="prepare_dataset", version_base=None)
 def main(parames):

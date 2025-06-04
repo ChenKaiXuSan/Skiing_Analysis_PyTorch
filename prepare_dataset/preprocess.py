@@ -29,8 +29,7 @@ from prepare_dataset.depth_estimation import DepthEstimator
 from prepare_dataset.optical_flow import OpticalFlow
 from prepare_dataset.yolov11_bbox import YOLOv11Bbox
 from prepare_dataset.yolov11_pose import YOLOv11Pose
-
-# from prepare_dataset.yolov11_mask import YOLOv11Mask
+from prepare_dataset.yolov11_mask import YOLOv11Mask
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +39,7 @@ class Preprocess:
         super(Preprocess, self).__init__()
 
         self.task = config.task
+        logger.info(f"Preprocess task: {self.task}")
 
         if "bbox" in self.task:
             self.yolo_model_bbox = YOLOv11Bbox(config)
@@ -52,8 +52,7 @@ class Preprocess:
             self.yolo_model_pose = None
 
         if "mask" in self.task:
-            # self.yolo_model_mask = YOLOv11Mask(config)
-            self.yolo_model_mask = None
+            self.yolo_model_mask = YOLOv11Mask(config)
         else:
             self.yolo_model_mask = None
 
@@ -134,14 +133,16 @@ class Preprocess:
 
         # * process pose
         if self.yolo_model_pose:
-            pose, pose_score, none_index, pose_results = self.yolo_model_pose(vframes, video_path)
+            pose, pose_score, pose_none_index, pose_results = self.yolo_model_pose(
+                vframes, video_path
+            )
         else:
             pose = torch.empty((0, 17, 3), dtype=torch.float32)
             pose_score = torch.empty((0, 17), dtype=torch.float32)
 
+        # * process mask
         if self.yolo_model_mask:
-            # use MultiPreprocess to process bbox, mask, pose
-            mask = self.yolo_model_mask(vframes, video_path)
+            mask, mask_none_index, mask_results = self.yolo_model_mask(vframes, video_path)
         else:
             mask = torch.empty(
                 (0, 1, vframes.shape[1], vframes.shape[2]), dtype=torch.float32

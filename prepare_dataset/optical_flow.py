@@ -34,8 +34,6 @@ from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
 from utils.utils import merge_frame_to_video
 from torchvision.io import write_png
 
-# TODO: should save the ckpt to path.
-
 
 logger = logging.getLogger(__name__)
 

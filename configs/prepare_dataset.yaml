@@ -34,7 +34,7 @@ optical_flow:
 batch_size: 30
 device: 1
 
-task: ["pose", "mask", "bbox", "depth", "optical_flow"]
+task: ["pose", "bbox", "depth", "optical_flow"]
 
 bytetrack:
   # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
