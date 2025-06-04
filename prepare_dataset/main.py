@@ -50,8 +50,6 @@ def process(parames, person: str):
 
     for one_video in one_person.iterdir():
 
-        res = {}
-
         vframes, _, info = read_video(one_video, pts_unit="sec", output_format="THWC")
 
         # * use preprocess to get information.
@@ -67,7 +65,7 @@ def process(parames, person: str):
         ) = preprocess(vframes, one_video)
 
         # * save the video frames keypoint
-        sample_json_info = {
+        pt_info = {
             "frames": vframes.cpu(),  # THWC
             "video_name": one_video.stem,
             "video_path": str(one_video),
@@ -84,10 +82,8 @@ def process(parames, person: str):
             },
         }
 
-        res[one_video.name] = sample_json_info
-
         # * save the video frames to json file
-        save_to_pt(res, SAVE_PATH, person)  # save the sample info to json file.
+        save_to_pt(one_video, SAVE_PATH, pt_info)
 
 @hydra.main(config_path="../configs/", config_name="prepare_dataset", version_base=None)
 def main(parames):
@@ -98,7 +94,7 @@ def main(parames):
         parames (hydra): hydra config.
     """
 
-    for i in range(1, 7):
+    for i in range(3, 7):
         process(parames, "run_{}".format(i))
 
 

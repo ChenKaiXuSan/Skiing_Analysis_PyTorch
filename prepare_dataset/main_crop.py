@@ -64,7 +64,7 @@ def main(parames):
         parames (hydra): hydra config.
     """
 
-    for i in range(1, 7):
+    for i in range(3, 7):
         process(parames, "run_{}".format(i))
 
 

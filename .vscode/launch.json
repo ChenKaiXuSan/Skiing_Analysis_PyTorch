@@ -15,7 +15,8 @@
       "console": "integratedTerminal",
       "args": [
         // "task=[optical_flow,depth]",
-        "task=[bbox]"
+        "task=[bbox, optical_flow,depth, pose]",
+        "device=1"
       ]
     },
     {

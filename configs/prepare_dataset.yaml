@@ -9,7 +9,7 @@ YOLO:
   pose_ckpt: "/workspace/code/ckpt/yolo11x-pose.pt"
   seg_ckpt: "/workspace/code/ckpt/yolo11x-seg.pt"
   bbox_ckpt: "/workspace/code/ckpt/yolo11x.pt"
-  conf: 0.5
+  conf: 0.8
   iou: 0.5
   verbose: False
   img_size: 640
@@ -25,7 +25,7 @@ depth_estimator:
 # Path
 # use YOLOv11 detection with tracking.
 extract_dataset:
-  data_path: "/workspace/data/raw" # this is raw data path.
+  data_path: "/workspace/data/side_raw" # this is raw data path.
   save_path: "/workspace/data/" # this is extracted video path.
 
 optical_flow:

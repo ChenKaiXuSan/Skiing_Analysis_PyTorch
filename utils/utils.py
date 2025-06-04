@@ -127,7 +127,7 @@ def merge_frame_to_video(
         str(_out_path / video_name) + ".mp4", fourcc, 30.0, (width, height)
     )
 
-    for f in tqdm(frames, desc=f"Saveing {video_name}", total=len(frames)):
+    for f in tqdm(frames, desc=f"Save {flag}-{video_name}", total=len(frames)):
         img = cv2.imread(str(f))
         out.write(img)
 
@@ -163,7 +163,7 @@ def save_to_json(sample_info: dict, save_path: Path, person: str) -> None:
         logger.info(f"Save the {v['video_name']} to {save_path_with_name}")
 
 
-def save_to_pt(sample_info: dict, save_path: Path, person: str) -> None:
+def save_to_pt(one_video:Path, save_path: Path, pt_info: dict[torch.Tensor]) -> None:
     """save the sample info to json file.
 
     Args:
@@ -172,11 +172,13 @@ def save_to_pt(sample_info: dict, save_path: Path, person: str) -> None:
         logger (logging): _description_
     """
 
-    for k, v in sample_info.items():
-        save_path_with_name = save_path / "pt" / person / (k.split(".")[0] + ".pt")
+    person = one_video.parts[-2]
+    video_name = one_video.stem
 
-        make_folder(save_path_with_name.parent)
+    save_path_with_name = save_path / "pt" / person / (video_name + ".pt")
 
-        torch.save(v, save_path_with_name)
+    make_folder(save_path_with_name.parent)
 
-        logger.info(f"Save the {v['video_name']} to {save_path_with_name}")
+    torch.save(pt_info, save_path_with_name)
+
+    logger.info(f"Save the {video_name} to {save_path_with_name}")

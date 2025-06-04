@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-'''
+"""
 File: /workspace/code/prepare_dataset/yolov11 copy.py
 Project: /workspace/code/prepare_dataset
 Created Date: Tuesday June 3rd 2025
@@ -18,7 +18,7 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
-'''
+"""
 
 from tqdm import tqdm
 from pathlib import Path
@@ -48,7 +48,7 @@ class YOLOv11Bbox:
         self.conf = configs.YOLO.conf
         self.iou = configs.YOLO.iou
         self.verbose = configs.YOLO.verbose
-        self.device = configs.device
+        self.device = f"cuda:{configs.device}"
 
         self.img_size = configs.YOLO.img_size
 
@@ -58,7 +58,6 @@ class YOLOv11Bbox:
 
     def save_image(self, r, video_path: Path, flag: str = "pose"):
 
-        # TODO: save the crop img for after process.
         person = video_path.parts[-2]
         video_name = video_path.stem
 
@@ -98,19 +97,13 @@ class YOLOv11Bbox:
             )
             res.save(save_dir=str(_save_path), save_name=f"{i}_{flag}_crop.png")
 
-    def get_YOLO_bbox_result(self, frame_list_bgr: list[np.ndarray], video_path: Path = None):
-        """
-        get_YOLO_mask_result, from frame_batch, for mask.
+    def get_YOLO_bbox_result(self, vframes: torch.Tensor, video_path: Path = None):
 
-        Args:
-            frame_batch (np.ndarry): for processed frame batch, (t, h, w, c)
-
-        Returns:
-            dict, list: two return values, with one batch mask in Dict, and none index in list.
-        """
+        vframes_numpy = vframes.numpy()
+        vframes_bgr = vframes_numpy[:, :, :, ::-1]
+        frame_list_bgr = [img for img in vframes_bgr]
 
         if self.tracking:
-            track_history = defaultdict(lambda: [])
 
             results = self.yolo_bbox.track(
                 source=frame_list_bgr,
@@ -162,21 +155,6 @@ class YOLOv11Bbox:
                     track.append([float(x), float(y)])
 
         return track_history
-    
-    # TODO: use id to track the bbox
-    # if the id bbox is large enough, we use the close bbox to track the person.
-    def track_bbox(self, track_dict: dict):
-
-        final_bbox = {}
-
-        for frame, track_info in track_dict.items():
-            track_ids = track_info["id"]
-            track_bboxes = track_info["bbox"]
-
-            for box, track_id in zip(track_bboxes, track_ids):
-                x, y, w, h = box
-                
-            
 
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 
@@ -186,61 +164,69 @@ class YOLOv11Bbox:
         _save_path = self.save_path / "vis" / "bbox" / _person / _video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
-        _save_crop_path = self.save_path / "vis" / "bbox_crop" / _person / _video_name 
+        _save_crop_path = self.save_path / "vis" / "bbox_crop" / _person / _video_name
         if not _save_crop_path.exists():
             _save_crop_path.mkdir(parents=True, exist_ok=True)
 
         none_index = []
-        batch_bbox = {}
-        res_list = []
-
-        track_dict = {}
-        track_id_list = []
-        track_bbox_list = []
-    
-
-        vframes_numpy = vframes.numpy()
-        vframes_bgr = vframes_numpy[:, :, :, ::-1]
-        frame_list_bgr = [ img for img in vframes_bgr]
+        bbox_dict = {}
 
         # * process bbox
-        results = (
-            self.get_YOLO_bbox_result(frame_list_bgr)
-        )
+        results = self.get_YOLO_bbox_result(vframes)
 
         for idx, r in tqdm(
-            enumerate(results), total=len(frame_list_bgr), desc="YOLO BBox", leave=False
+            enumerate(results), total=len(vframes), desc="YOLO BBox", leave=False
         ):
 
-            # save the id and body center for tracking.
-            if r.boxes and r.boxes.is_track:
-                boxes = r.boxes.xywh.cpu()
-                track_ids = r.boxes.id.int().cpu().tolist()
-
-                track_dict[idx] = {
-                    "id": track_ids,
-                    "bbox": boxes,
-                }
-
-                
             # judge if have bbox.
             if r.boxes is None or r.boxes.shape[0] == 0:
                 none_index.append(idx)
-                batch_bbox[idx] = torch.tensor([])  # empty tensor
+                bbox_dict[idx] = torch.tensor([])  # empty tensor
+
+            elif r.boxes.shape[0] == 1:
+                # if have only one bbox, we use the first one.
+                bbox_dict[idx] = r.boxes.xywh[0]
 
             elif r.boxes.shape[0] > 1:
-                # if have more than one bbox, we use the first one.
-                batch_bbox[idx] = r.boxes.xywh[0]
+
+                if idx == 0:
+                    # if the first frame, we just use the first bbox.
+                    bbox_dict[idx] = r.boxes.xywh[0]
+                    continue
+
+                # * save the track history
+                if r.boxes and r.boxes.is_track:
+
+                    x, y, w, h = bbox_dict[idx - 1]
+                    pre_box_center = [x, y]
+
+                    boxes = r.boxes.xywh.cpu()
+                    track_ids = r.boxes.id.int().cpu().tolist()
+
+                    distance_list = []
+
+                    for box, track_id in zip(boxes, track_ids):
+
+                        x, y, w, h = box
+
+                        distance_list.append(
+                            torch.norm(
+                                torch.tensor([x, y]) - torch.tensor(pre_box_center)
+                            )
+                        )
+
+                    # find the closest bbox to the previous bbox
+                    closest_idx = np.argmin(distance_list)
+                    closest_box = boxes[closest_idx]
+                    bbox_dict[idx] = closest_box
+
             else:
-                batch_bbox[idx] = r.boxes.xywh  # n, 4
+                ValueError(
+                    f"the bbox shape is not correct, idx: {idx}, shape: {r.boxes.shape}"
+                )
 
             r.save(filename=str(_save_path / f"{idx}_bbox.png"))
             r.save_crop(save_dir=str(_save_crop_path), file_name=f"{idx}_bbox_crop.png")
-
-            res_list.append(r)
-
-        # find the track id 
-        self.track_bbox(track_dict)
 
         # * save the result to img
         if self.save:
@@ -252,4 +238,10 @@ class YOLOv11Bbox:
                 flag="bbox",
             )
 
-        return batch_bbox, none_index, res_list
+        # convert bbox_dict to tensor
+        bbox = torch.stack(
+            [bbox_dict[i] for i in range(len(bbox_dict)) if i not in none_index], 
+            dim=0
+        )
+
+        return bbox, none_index, results
