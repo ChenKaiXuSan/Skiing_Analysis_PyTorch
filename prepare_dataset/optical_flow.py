@@ -132,8 +132,6 @@ class OpticalFlow(nn.Module):
 
         _pred_flow = self.get_Optical_flow(frames)  # f, c, h, w
 
-        del self.model
-        
         if self.save:
             self.save_image(_pred_flow, video_path)
 
