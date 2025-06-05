@@ -96,15 +96,66 @@ class YOLOv11Bbox:
 
         return results
 
+    def draw_and_save_boxes(
+        self, img_tensor: torch.Tensor, bboxes, save_path: Path, video_path: Path
+    ):
+
+        _video_name = video_path.stem
+        _person = video_path.parts[-2]
+
+        # filter save path
+        _save_path = save_path / "vis" / "filter_img" / "bbox" / _person / _video_name
+
+        if not _save_path.exists():
+            _save_path.mkdir(parents=True, exist_ok=True)
+
+        for i, (img_tensor, xywh) in tqdm(
+            enumerate(zip(img_tensor, bboxes)),
+            total=len(img_tensor),
+            desc="Draw and Save BBoxes",
+            leave=False,
+        ):
+
+            # 转换为 numpy 图像（H, W, C）
+            img_np = img_tensor.cpu().numpy()
+            if img_np.max() <= 1.0:
+                img_np = (img_np * 255).astype(np.uint8)
+            else:
+                img_np = img_np.astype(np.uint8)
+
+            x_center, y_center, w, h = xywh
+
+            # 画框 + 标签
+            x1 = int(x_center - w / 2)
+            y1 = int(y_center - h / 2)
+            x2 = int(x_center + w / 2)
+            y2 = int(y_center + h / 2)
+
+            cv2.rectangle(
+                img_np,
+                (x1, y1),
+                (x2, y2),
+                (0, 255, 0),  # 绿色边框
+                2,
+            )
+
+            _img_save_path = Path(_save_path) / f"{i}_bbox_filter.jpg"
+            # 保存图像
+            cv2.imwrite(str(_img_save_path), cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR))
+
+        merge_frame_to_video(save_path, _person, _video_name, "bbox", filter=True)
+
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 
         _video_name = video_path.stem
         _person = video_path.parts[-2]
 
-        _save_path = self.save_path / "vis" / "bbox" / _person / _video_name
+        _save_path = self.save_path / "vis" / "img" / "bbox" / _person / _video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
-        _save_crop_path = self.save_path / "vis" / "bbox_crop" / _person / _video_name
+        _save_crop_path = (
+            self.save_path / "vis" / "img" / "bbox_crop" / _person / _video_name
+        )
         if not _save_crop_path.exists():
             _save_crop_path.mkdir(parents=True, exist_ok=True)
 
@@ -118,8 +169,11 @@ class YOLOv11Bbox:
             enumerate(results), total=len(vframes), desc="YOLO BBox", leave=False
         ):
 
+            if idx == 0 and r.boxes is not None and r.boxes.shape[0] > 0:
+                bbox_dict[idx] = r.boxes.xywh[0]
+
             # judge if have bbox.
-            if r.boxes is None or r.boxes.shape[0] == 0:
+            elif r.boxes is None or r.boxes.shape[0] == 0:
                 none_index.append(idx)
                 bbox_dict[idx] = None
 
@@ -128,11 +182,6 @@ class YOLOv11Bbox:
                 bbox_dict[idx] = r.boxes.xywh[0]
 
             elif r.boxes.shape[0] > 1:
-
-                if idx == 0:
-                    # if the first frame, we just use the first bbox.
-                    bbox_dict[idx] = r.boxes.xywh[0]
-                    continue
 
                 # * save the track history
                 if r.boxes and r.boxes.is_track:
@@ -168,16 +217,6 @@ class YOLOv11Bbox:
             r.save(filename=str(_save_path / f"{idx}_bbox.png"))
             r.save_crop(save_dir=str(_save_crop_path), file_name=f"{idx}_bbox_crop.png")
 
-        # * save the result to img
-        if self.save:
-            # save the video frames to video file
-            merge_frame_to_video(
-                self.save_path,
-                person=video_path.parts[-2],
-                video_name=video_path.stem,
-                flag="bbox",
-            )
-
         # * process none index
         if len(none_index) > 0:
             logger.warning(
@@ -190,5 +229,24 @@ class YOLOv11Bbox:
             [bbox_dict[k] for k in sorted(bbox_dict.keys())],
             dim=0,
         )
+
+        # * save the result to img
+        if self.save:
+            # save the video frames to video file
+            merge_frame_to_video(
+                self.save_path,
+                person=_person,
+                video_name=_video_name,
+                flag="bbox",
+                filter=False,
+            )
+
+            # filter save path
+            self.draw_and_save_boxes(
+                img_tensor=vframes,
+                bboxes=bbox,
+                save_path=self.save_path,
+                video_path=video_path,
+            )
 
         return bbox, none_index, results

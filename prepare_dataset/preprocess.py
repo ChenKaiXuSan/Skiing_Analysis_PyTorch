@@ -110,7 +110,7 @@ class Preprocess:
             depth = self.depth_estimator(vframes, video_path)
         else:
             depth = torch.empty(
-                (0, vframes.shape[1], vframes.shape[2]), dtype=torch.float32
+                (0, 1, vframes.shape[1], vframes.shape[2]), dtype=torch.float32
             )
 
         # * process optical flow
@@ -142,10 +142,14 @@ class Preprocess:
 
         # * process mask
         if self.yolo_model_mask:
-            mask, mask_none_index, mask_results = self.yolo_model_mask(vframes, video_path)
+            mask, mask_none_index, mask_results = self.yolo_model_mask(
+                vframes, video_path
+            )
         else:
             mask = torch.empty(
                 (0, 1, vframes.shape[1], vframes.shape[2]), dtype=torch.float32
             )
+
+        # * shape check
 
         return bbox_none_index, optical_flow, bbox, mask, pose, pose_score, depth

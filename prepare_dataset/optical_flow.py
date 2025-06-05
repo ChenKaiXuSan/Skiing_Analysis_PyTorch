@@ -108,7 +108,7 @@ class OpticalFlow(nn.Module):
         person = video_path.parts[-2]
         video_name = video_path.stem
 
-        _save_path = Path(self.save_path) / "vis" / "optical_flow" / person / video_name
+        _save_path = Path(self.save_path) / "vis" / "img" / "optical_flow" / person / video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
 

@@ -19,7 +19,6 @@ Date 	By 	Comments
 
 import os
 import shutil
-import json
 
 import cv2
 from tqdm import tqdm
@@ -109,10 +108,15 @@ def make_folder(path, *args):
 
 
 def merge_frame_to_video(
-    save_path: Path, person: str, video_name: str, flag: str
+    save_path: Path, person: str, video_name: str, flag: str, filter: bool = False
 ) -> None:
-    _save_path = save_path / "vis" / flag / person / video_name
-    _out_path = save_path / "vis_video" / flag / person
+
+    if filter:
+        _save_path = save_path / "vis" / "filter_img" / flag / person / video_name
+        _out_path = save_path / "vis" / "filter_video" / flag / person
+    else:
+        _save_path = save_path / "vis" / "img" / flag / person / video_name
+        _out_path = save_path / "vis" / "video" / flag / person
 
     frames = sorted(list(_save_path.iterdir()), key=lambda x: int(x.stem.split("_")[0]))
 
@@ -134,33 +138,6 @@ def merge_frame_to_video(
     out.release()
 
     logger.info(f"Video saved to {_out_path / video_name}.mp4")
-
-
-def save_to_json(sample_info: dict, save_path: Path, person: str) -> None:
-    """save the sample info to json file.
-
-    Args:
-        sample_info (dict): _description_
-        save_path (Path): _description_
-        logger (logging): _description_
-    """
-
-    for k, v in sample_info.items():
-        save_path_with_name = save_path / "json" / person / (k.split(".")[0] + ".json")
-
-        make_folder(save_path_with_name.parent)
-
-        # convert Path to str.
-        v["bbox"] = v["bbox"].tolist()  # serialized as list
-        v["mask"] = v["mask"].tolist()
-        v["keypoint"]["keypoint"] = v["keypoint"]["keypoint"].tolist()
-        v["keypoint"]["keypoint_score"] = v["keypoint"]["keypoint_score"].tolist()
-        v["depth"] = v["depth"].tolist()
-
-        with open(save_path_with_name, "w") as f:
-            json.dump(v, f, indent=4)
-
-        logger.info(f"Save the {v['video_name']} to {save_path_with_name}")
 
 
 def save_to_pt(one_video: Path, save_path: Path, pt_info: dict[torch.Tensor]) -> None:
@@ -196,7 +173,7 @@ def process_none(batch_Dict: dict[torch.Tensor], none_index: list):
         list: list include the replace value for None value.
     """
 
-    boundary = len(batch_Dict) - 1 
+    boundary = len(batch_Dict) - 1
     filter_batch = batch_Dict.copy()
 
     for i in none_index:

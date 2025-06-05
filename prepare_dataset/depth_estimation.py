@@ -77,7 +77,7 @@ class DepthEstimator:
         person = video_path.parts[-2]
         video_name = video_path.stem
 
-        _save_path = self.save_path / "vis" / "depth" / person / video_name
+        _save_path = self.save_path / "vis" / "img" / "depth" / person / video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
 
