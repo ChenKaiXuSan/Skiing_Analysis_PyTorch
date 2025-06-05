@@ -24,6 +24,7 @@ from tqdm import tqdm
 from pathlib import Path
 
 import torch
+import cv2
 
 import logging
 import numpy as np
