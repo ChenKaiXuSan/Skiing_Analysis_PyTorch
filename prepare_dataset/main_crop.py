@@ -26,12 +26,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import hydra
-
-import torch
 from torchvision.io import read_video
-
-from utils.utils import save_to_pt, merge_frame_to_video
-
+ 
 from prepare_dataset.preprocess import Preprocess
 
 
@@ -55,40 +51,9 @@ def process(parames, person: str):
         vframes, _, info = read_video(one_video, pts_unit="sec", output_format="THWC")
 
         # * use preprocess to get information.
-        # the format is: final_frames, bbox_none_index, label, optical_flow, bbox, mask, pose
-        (
-            bbox_none_index,
-            optical_flow,
-            bbox,
-            mask,
-            keypoints,
-            keypoints_score,
-            depth,
-        ) = preprocess(vframes, one_video)
+        bbox, bbox_none_idx, bbox_res_list = preprocess.yolo_model_bbox(vframes, one_video)
 
-        # * save the video frames keypoint
-        pt_info = {
-            "frames": vframes.cpu(),  # THWC
-            "video_name": one_video.stem,
-            "video_path": str(one_video),
-            "img_shape": (vframes.shape[1], vframes.shape[2]),
-            "frame_count": vframes.shape[0],
-            "none_index": bbox_none_index,
-            "bbox": bbox.cpu(),  # xywh
-            "mask": mask.cpu(),
-            "optical_flow": optical_flow.cpu(),
-            "depth": depth.cpu(),
-            "keypoint": {
-                "keypoint": keypoints.cpu(),  # xyn
-                "keypoint_score": keypoints_score.cpu(),
-            },
-        }
-
-        # * save the video frames to json file
-        save_to_pt(one_video, SAVE_PATH, pt_info)
-
-        torch.cuda.empty_cache()
-
+        logger.info(f"Finish the bbox detection for {one_video.name}")
 
 @hydra.main(config_path="../configs/", config_name="prepare_dataset", version_base=None)
 def main(parames):

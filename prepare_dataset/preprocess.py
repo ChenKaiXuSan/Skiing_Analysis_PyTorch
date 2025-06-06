@@ -25,27 +25,46 @@ from pathlib import Path
 
 import torch
 
-
-from prepare_dataset.yolov11 import MultiPreprocess
 from prepare_dataset.depth_estimation import DepthEstimator
 from prepare_dataset.optical_flow import OpticalFlow
+from prepare_dataset.yolov11_bbox import YOLOv11Bbox
+from prepare_dataset.yolov11_pose import YOLOv11Pose
+from prepare_dataset.yolov11_mask import YOLOv11Mask
+
+logger = logging.getLogger(__name__)
 
 
 class Preprocess:
     def __init__(self, config) -> None:
         super(Preprocess, self).__init__()
 
-        self.yolo_model = MultiPreprocess(config)
+        self.task = config.task
+        logger.info(f"Preprocess task: {self.task}")
 
-        self.depth_estimator = DepthEstimator(config)
+        if "bbox" in self.task:
+            self.yolo_model_bbox = YOLOv11Bbox(config)
+        else:
+            self.yolo_model_bbox = None
 
-        # ! notice: the OF method have err, the reason do not know.
-        if config.OF:
+        if "pose" in self.task:
+            self.yolo_model_pose = YOLOv11Pose(config)
+        else:
+            self.yolo_model_pose = None
+
+        if "mask" in self.task:
+            self.yolo_model_mask = YOLOv11Mask(config)
+        else:
+            self.yolo_model_mask = None
+
+        if "depth" in self.task:
+            self.depth_estimator = DepthEstimator(config)
+        else:
+            self.depth_estimator = None
+
+        if "optical_flow" in self.task:
             self.of_model = OpticalFlow(config)
         else:
             self.of_model = None
-
-        self.batch_size = config.batch_size
 
     # def shape_check(self, check: list):
     #     """
@@ -84,34 +103,53 @@ class Preprocess:
     #         else:
     #             raise ValueError("shape not match")
 
-    def __call__(self, vframes: torch.tensor, video_path: Path):
-        """
-        forward preprocess method for one batch.
-
-        Args:
-            batch (torch.tensor): batch imgs, (b, c, t, h, w)
-            batch_idx (int): epoch index.
-
-        Returns:
-            list: list for different moddailty, return video, bbox_non_index, labels, bbox, mask, pose
-        """
+    def __call__(self, vframes: torch.Tensor, video_path: Path):
 
         # * process depth
-        depth = self.depth_estimator(vframes, video_path)
-
-        # * process mask, pose, bbox
-        video, bbox_none_index, bbox, mask, pose, pose_score = self.yolo_model(
-            vframes, video_path
-        )
-
-        # FIXME: OF method have some problem, the reason do not know.
-        # when not use OF, return Nlone value.
-        if self.of_model is not None:
-            optical_flow = self.of_model.process_batch(vframes)
+        if self.depth_estimator:
+            depth = self.depth_estimator(vframes, video_path)
         else:
-            optical_flow = None
+            depth = torch.empty(
+                (0, 1, vframes.shape[1], vframes.shape[2]), dtype=torch.float32
+            )
 
-        # shape check
-        # self.shape_check([video, mask, bbox, pose, optical_flow])
+        # * process optical flow
+        if self.of_model:
+            optical_flow = self.of_model(vframes, video_path)
+        else:
+            optical_flow = torch.empty(
+                (0, 2, vframes.shape[1], vframes.shape[2]), dtype=torch.float32
+            )
 
-        return video, bbox_none_index, optical_flow, bbox, mask, pose, pose_score, depth
+        # * process bbox
+        if self.yolo_model_bbox:
+            # use MultiPreprocess to process bbox, mask, pose
+            bbox, bbox_none_index, bbox_results = self.yolo_model_bbox(
+                vframes, video_path
+            )
+        else:
+            bbox_none_index = []
+            bbox = torch.empty((0, 4), dtype=torch.float32)
+
+        # * process pose
+        if self.yolo_model_pose:
+            pose, pose_score, pose_none_index, pose_results = self.yolo_model_pose(
+                vframes, video_path
+            )
+        else:
+            pose = torch.empty((0, 17, 3), dtype=torch.float32)
+            pose_score = torch.empty((0, 17), dtype=torch.float32)
+
+        # * process mask
+        if self.yolo_model_mask:
+            mask, mask_none_index, mask_results = self.yolo_model_mask(
+                vframes, video_path
+            )
+        else:
+            mask = torch.empty(
+                (0, 1, vframes.shape[1], vframes.shape[2]), dtype=torch.float32
+            )
+
+        # * shape check
+
+        return bbox_none_index, optical_flow, bbox, mask, pose, pose_score, depth
