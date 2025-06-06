@@ -170,6 +170,7 @@ class YOLOv11Bbox:
             enumerate(results), total=len(vframes), desc="YOLO BBox", leave=False
         ):
 
+            # first frame bbox to tracking
             if idx == 0 and r.boxes is not None and r.boxes.shape[0] > 0:
                 bbox_dict[idx] = r.boxes.xywh[0]
 
@@ -178,8 +179,9 @@ class YOLOv11Bbox:
                 none_index.append(idx)
                 bbox_dict[idx] = None
 
+            # if have only one bbox, we use the first one.
+            # FIXME: if the target lost the bbox, will save the other bbox.
             elif r.boxes.shape[0] == 1:
-                # if have only one bbox, we use the first one.
                 bbox_dict[idx] = r.boxes.xywh[0]
 
             elif r.boxes.shape[0] > 1:
