@@ -32,10 +32,10 @@
       ]
     }
     {
-      "name": "convert_frame_video",
+      "name": "pose3d",
       "type": "debugpy",
       "request": "launch",
-      "module": "analysis.convert_img_video",
+      "module": "project.main",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
     }
