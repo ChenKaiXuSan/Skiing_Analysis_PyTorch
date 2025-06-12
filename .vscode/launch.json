@@ -39,5 +39,48 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
     }
+    {
+      "name": "prepare_data_2d_custom",
+      "type": "python",
+      "request": "launch",
+      "module": "VideoPose3D.data.prepare_data_2d_custom",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": []
+    }
+        {
+      "name": "run_custom",
+      "type": "python",
+      "request": "launch",
+      "module": "VideoPose3D.run",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+        "-d",
+        // "custom",
+        "/workspace/data/custom_npz.npz",
+        "-k",
+        "myvideos",
+        "-arc",
+        "3,3,3,3,3",
+        "-c",
+        "checkpoint",
+        "--evaluate",
+        "/workspace/VideoPose3D/checkpoint/pretrained_h36m_detectron_coco.bin",
+        "--render",
+        "--viz-subject",
+        "osmo_2",
+        "--viz-action",
+        "custom",
+        "--viz-camera",
+        "0",
+        "--viz-video",
+        "/workspace/VideoPose3D/input_directory/osmo_2.mp4",
+        "--viz-output",
+        "output.gif",
+        "--viz-size",
+        "6"
+      ]
+    }
   ]
 }
