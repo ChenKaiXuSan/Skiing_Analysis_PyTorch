@@ -139,4 +139,4 @@ class OpticalFlow(nn.Module):
                 self.save_path, video_path.parts[-2], video_path.stem, "optical_flow"
             )
 
-        return _pred_flow.permute(0, 2, 3, 1)
+        return _pred_flow

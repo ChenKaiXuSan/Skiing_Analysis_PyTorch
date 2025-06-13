@@ -115,7 +115,7 @@ subjects_semi = [] if not args.subjects_unlabeled else args.subjects_unlabeled.s
 if not args.render:
     subjects_test = args.subjects_test.split(',')
 else:
-    subjects_test = [args.viz_subject]
+    subjects_test = args.viz_subject.split(',') 
 
 semi_supervised = len(subjects_semi) > 0
 if semi_supervised and not dataset.supports_semi_supervised():
@@ -737,65 +737,69 @@ def evaluate(test_generator, action=None, return_predictions=False, use_trajecto
 
 if args.render:
     print('Rendering...')
+
+    for sbj_test in subjects_test:
     
-    input_keypoints = keypoints[args.viz_subject][args.viz_action][args.viz_camera].copy()
-    ground_truth = None
-    if args.viz_subject in dataset.subjects() and args.viz_action in dataset[args.viz_subject]:
-        if 'positions_3d' in dataset[args.viz_subject][args.viz_action]:
-            ground_truth = dataset[args.viz_subject][args.viz_action]['positions_3d'][args.viz_camera].copy()
-    if ground_truth is None:
-        print('INFO: this action is unlabeled. Ground truth will not be rendered.')
+        input_keypoints = keypoints[sbj_test][args.viz_action][args.viz_camera].copy()
+        ground_truth = None
+        if sbj_test in dataset.subjects() and args.viz_action in dataset[sbj_test]:
+            if 'positions_3d' in dataset[sbj_test][args.viz_action]:
+                ground_truth = dataset[sbj_test][args.viz_action]['positions_3d'][args.viz_camera].copy()
+        if ground_truth is None:
+            print('INFO: this action is unlabeled. Ground truth will not be rendered.')
+            
+        gen = UnchunkedGenerator(None, None, [input_keypoints],
+                                pad=pad, causal_shift=causal_shift, augment=args.test_time_augmentation,
+                                kps_left=kps_left, kps_right=kps_right, joints_left=joints_left, joints_right=joints_right)
+        prediction = evaluate(gen, return_predictions=True) # * here predict the 3d pose 
+        if model_traj is not None and ground_truth is None:
+            prediction_traj = evaluate(gen, return_predictions=True, use_trajectory_model=True)
+            prediction += prediction_traj
         
-    gen = UnchunkedGenerator(None, None, [input_keypoints],
-                             pad=pad, causal_shift=causal_shift, augment=args.test_time_augmentation,
-                             kps_left=kps_left, kps_right=kps_right, joints_left=joints_left, joints_right=joints_right)
-    prediction = evaluate(gen, return_predictions=True)
-    if model_traj is not None and ground_truth is None:
-        prediction_traj = evaluate(gen, return_predictions=True, use_trajectory_model=True)
-        prediction += prediction_traj
-    
-    if args.viz_export is not None:
-        print('Exporting joint positions to', args.viz_export)
-        # Predictions are in camera space
-        np.save(args.viz_export, prediction)
-    
-    if args.viz_output is not None:
-        if ground_truth is not None:
-            # Reapply trajectory
-            trajectory = ground_truth[:, :1]
-            ground_truth[:, 1:] += trajectory
-            prediction += trajectory
+        if args.viz_export is not None:
+            print('Exporting joint positions to', args.viz_export)
+            # Predictions are in camera space
+            np.save(args.viz_export, prediction)
         
-        # Invert camera transformation
-        cam = dataset.cameras()[args.viz_subject][args.viz_camera]
-        if ground_truth is not None:
-            prediction = camera_to_world(prediction, R=cam['orientation'], t=cam['translation'])
-            ground_truth = camera_to_world(ground_truth, R=cam['orientation'], t=cam['translation'])
-        else:
-            # If the ground truth is not available, take the camera extrinsic params from a random subject.
-            # They are almost the same, and anyway, we only need this for visualization purposes.
-            for subject in dataset.cameras():
-                if 'orientation' in dataset.cameras()[subject][args.viz_camera]:
-                    rot = dataset.cameras()[subject][args.viz_camera]['orientation']
-                    break
-            prediction = camera_to_world(prediction, R=rot, t=0)
-            # We don't have the trajectory, but at least we can rebase the height
-            prediction[:, :, 2] -= np.min(prediction[:, :, 2])
+        if args.viz_output is not None:
+            if ground_truth is not None:
+                # Reapply trajectory
+                trajectory = ground_truth[:, :1]
+                ground_truth[:, 1:] += trajectory
+                prediction += trajectory
+            
+            # Invert camera transformation
+            cam = dataset.cameras()[sbj_test][args.viz_camera]
+            if ground_truth is not None:
+                prediction = camera_to_world(prediction, R=cam['orientation'], t=cam['translation'])
+                ground_truth = camera_to_world(ground_truth, R=cam['orientation'], t=cam['translation'])
+            else:
+                # If the ground truth is not available, take the camera extrinsic params from a random subject.
+                # They are almost the same, and anyway, we only need this for visualization purposes.
+                for subject in dataset.cameras():
+                    if 'orientation' in dataset.cameras()[subject][args.viz_camera]:
+                        rot = dataset.cameras()[subject][args.viz_camera]['orientation']
+                        break
+                prediction = camera_to_world(prediction, R=rot, t=0)
+                # We don't have the trajectory, but at least we can rebase the height
+                prediction[:, :, 2] -= np.min(prediction[:, :, 2])
+            
+            anim_output = {'Reconstruction': prediction}
+            if ground_truth is not None and not args.viz_no_ground_truth:
+                anim_output['Ground truth'] = ground_truth
+            
+            # TODO: 这里生成真是的kpt 3d
+            input_keypoints = image_coordinates(input_keypoints[..., :2], w=cam['res_w'], h=cam['res_h'])
+            
+            from VideoPose3D.common.visualization import render_animation
+            _opt_path = args.viz_output + '/{}_{}_{}.gif'.format(sbj_test, args.viz_action, args.viz_camera)
+            _ipt_video_path = "/workspace/data/side_raw/" + sbj_test.split('_')[0] + "_" + sbj_test.split('_')[1] + "/" + sbj_test.split("_")[2] + "_" + sbj_test.split("_")[3] + '.mp4'
+            render_animation(input_keypoints, keypoints_metadata, anim_output,
+                            dataset.skeleton(), dataset.fps(), args.viz_bitrate, cam['azimuth'], _opt_path,
+                            limit=args.viz_limit, downsample=args.viz_downsample, size=args.viz_size,
+                            input_video_path=_ipt_video_path, viewport=(cam['res_w'], cam['res_h']),
+                            input_video_skip=args.viz_skip)
         
-        anim_output = {'Reconstruction': prediction}
-        if ground_truth is not None and not args.viz_no_ground_truth:
-            anim_output['Ground truth'] = ground_truth
-        
-        # TODO: 这里生成真是的kpt 3d
-        input_keypoints = image_coordinates(input_keypoints[..., :2], w=cam['res_w'], h=cam['res_h'])
-        
-        from VideoPose3D.common.visualization import render_animation
-        render_animation(input_keypoints, keypoints_metadata, anim_output,
-                         dataset.skeleton(), dataset.fps(), args.viz_bitrate, cam['azimuth'], args.viz_output,
-                         limit=args.viz_limit, downsample=args.viz_downsample, size=args.viz_size,
-                         input_video_path=args.viz_video, viewport=(cam['res_w'], cam['res_h']),
-                         input_video_skip=args.viz_skip)
-    
 else:
     print('Evaluating...')
     all_actions = {}
