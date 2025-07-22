@@ -30,27 +30,27 @@
         // "task=[optical_flow,depth]",
         "task=[bbox]"
       ]
-    }
+    },
     {
       "name": "pose3d",
       "type": "debugpy",
       "request": "launch",
       "module": "project.main",
       "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-    }
+      "console": "integratedTerminal"
+    },
     {
       "name": "prepare_data_2d_custom",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "module": "VideoPose3D.data.prepare_data_2d_custom",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "args": []
-    }
-        {
+    },
+    {
       "name": "run_custom",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "module": "VideoPose3D.run",
       "cwd": "${workspaceFolder}",
@@ -81,6 +81,14 @@
         "--viz-size",
         "6"
       ]
+    },
+    {
+      "name": "camera_calibration",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "camera_calibration.calibration",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
     }
   ]
 }
