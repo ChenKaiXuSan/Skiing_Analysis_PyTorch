@@ -89,6 +89,14 @@
       "module": "camera_calibration.calibration",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
+    },
+    {
+      "name": "triangulate",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "kpt_generation.main",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
     }
   ]
 }
