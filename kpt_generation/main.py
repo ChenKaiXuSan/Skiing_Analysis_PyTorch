@@ -10,107 +10,108 @@ Last Modified: July 28th, 2025
 import os
 import numpy as np
 import cv2
+import glob
 import matplotlib
 
-matplotlib.use("Agg")  # ✅ 防止在无GUI环境下崩溃
+matplotlib.use("Agg")  # ✅ 禁用图形界面，使用非交互后端
 import matplotlib.pyplot as plt
+
 import torch
 
 
 def triangulate_joints(keypoints1, keypoints2, K, R, T):
-    """
-    使用两个视角的2D关节点和相机参数进行三角测量，恢复3D坐标。
-    """
     if keypoints1.shape != keypoints2.shape or keypoints1.shape[1] != 2:
         raise ValueError(
-            f"Keypoints shape mismatch or not (N, 2): {keypoints1.shape} vs {keypoints2.shape}"
+            f"Keypoints shape mismatch: {keypoints1.shape} vs {keypoints2.shape}"
         )
-
-    P1 = K @ np.hstack((np.eye(3), np.zeros((3, 1))))  # 投影矩阵1
-    P2 = K @ np.hstack((R, T.reshape(3, 1)))  # 投影矩阵2
-
-    pts1 = keypoints1.T.astype(np.float32)  # (2, N)
+    P1 = K @ np.hstack((np.eye(3), np.zeros((3, 1))))
+    P2 = K @ np.hstack((R, T.reshape(3, 1)))
+    pts1 = keypoints1.T.astype(np.float32)
     pts2 = keypoints2.T.astype(np.float32)
-
-    pts_4d = cv2.triangulatePoints(P1, P2, pts1, pts2)  # (4, N)
-    joints_3d = (pts_4d[:3, :] / pts_4d[3, :]).T  # (N, 3)
-
-    return joints_3d
+    pts_4d = cv2.triangulatePoints(P1, P2, pts1, pts2)
+    return (pts_4d[:3, :] / pts_4d[3, :]).T
 
 
-def visualize_3d_joints(
-    joints_3d, save_path="triangulated_3d_joints.png", title="Triangulated 3D Joints"
-):
-    """
-    可视化三维关键点
-    """
+def visualize_3d_joints(joints_3d, save_path, title="Triangulated 3D Joints"):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
     ax.scatter(joints_3d[:, 0], joints_3d[:, 1], joints_3d[:, 2], c="blue", s=30)
-
     for i, (x, y, z) in enumerate(joints_3d):
         ax.text(x, y, z, str(i), size=8)
-
     ax.set_title(title)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
     plt.tight_layout()
     fig.savefig(save_path, dpi=300)
-    print(f"[INFO] 3D joints plot saved to: {save_path}")
+    plt.close(fig)
+    print(f"[INFO] Saved: {save_path}")
 
 
 def load_keypoints_from_pt(file_path):
-    """
-    加载.pt文件中的2D关键点
-    """
     if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
-
-    print(f"[INFO] Loading keypoints from {file_path}")
-    data = torch.load(file_path, map_location="cpu")
-
+        raise FileNotFoundError(f"Missing file: {file_path}")
+    print(f"[INFO] Loading: {file_path}")
     try:
-        keypoints = np.array(data["keypoint"]["keypoint"])
+        data = torch.load(file_path, map_location="cpu")
+        keypoints = np.array(data["keypoint"]["keypoint"]).squeeze(0)  # (T, N, 2)
+        if keypoints.ndim != 3 or keypoints.shape[2] != 2:
+            raise ValueError(f"Invalid shape: {keypoints.shape}")
+        return keypoints
     except Exception as e:
-        raise KeyError(f"Missing keypoint data in {file_path}: {e}")
-
-    return keypoints
+        raise RuntimeError(f"Error loading {file_path}: {e}")
 
 
-if __name__ == "__main__":
-    # === 文件路径 ===
-    left_path = "/workspace/data/pt/run_1/osmo_1.pt"
-    right_path = "/workspace/data/pt/run_1/osmo_2.pt"
+def process_one_video(left_path, right_path, output_path):
+    os.makedirs(output_path, exist_ok=True)
 
-    # === 加载关键点 ===
-    keypoints1 = load_keypoints_from_pt(left_path).squeeze(0)  # (T, N, 2)
-    keypoints2 = load_keypoints_from_pt(right_path).squeeze(0)  # (T, N, 2)
+    kpt1 = load_keypoints_from_pt(left_path)
+    kpt2 = load_keypoints_from_pt(right_path)
 
-    # === 相机内参矩阵 ===
+    if kpt1.shape[0] != kpt2.shape[0]:
+        raise ValueError(f"Frame mismatch: {kpt1.shape[0]} vs {kpt2.shape[0]}")
+
+    # 相机内参
     K = np.array(
         [
-            [1.67514300e03, 0.00000000e00, 8.80968039e02],
-            [0.00000000e00, 1.28634860e03, 1.02593966e03],
-            [0.00000000e00, 0.00000000e00, 1.00000000e00],
+            [1675.1430, 0.0000, 880.9680],
+            [0.0000, 1286.3486, 1025.9397],
+            [0.0000, 0.0000, 1.0000],
         ],
         dtype=np.float32,
     )
 
-    # === 外参：视角2相对于视角1的平移和旋转 ===
+    # 外参：180度绕Y轴 + 右移10cm
     R = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=np.float32)
+    T = np.array([1, 0.0, 0.0], dtype=np.float32)
 
-    T = np.array([0.1, 0.0, 0.0], dtype=np.float32)  # Camera2 相对于 Camera1 右移10cm
+    for i in range(kpt1.shape[0]):
+        joints_3d = triangulate_joints(kpt1[i], kpt2[i], K, R, T)
+        img_path = os.path.join(output_path, f"frame_{i:04d}.png")
+        visualize_3d_joints(joints_3d, save_path=img_path)
 
-    assert (
-        keypoints1.shape[0] == keypoints2.shape[0]
-    ), "Keypoints must have the same number of frames"
 
-    # === 三角测量 ===
-    for k in range(keypoints1.shape[0]):
+def main(input_root, output_root):
+    subjects = sorted(glob.glob(f"{input_root}/*/"))
+    if not subjects:
+        raise FileNotFoundError(f"No folders found in: {input_root}")
+    print(f"[INFO] Found {len(subjects)} subjects in {input_root}")
 
-        joints_3d = triangulate_joints(keypoints1[k], keypoints2[k], K, R, T)
-        print("[INFO] Triangulated 3D joints:\n", joints_3d)
+    for person_dir in subjects:
+        person_name = os.path.basename(person_dir.rstrip("/"))
+        print(f"\n[INFO] Processing: {person_name}")
 
-    # === 可视化 ===
-    visualize_3d_joints(joints_3d)
+        left = os.path.join(person_dir, "osmo_1.pt")
+        right = os.path.join(person_dir, "osmo_2.pt")
+        out_dir = os.path.join(output_root, person_name)
+
+        try:
+            process_one_video(left, right, out_dir)
+        except Exception as e:
+            print(f"[ERROR] Failed: {person_name} – {e}")
+
+
+if __name__ == "__main__":
+    input_path = "/workspace/data/pt"
+    output_path = "/workspace/code/logs/triangulated_3d_joints"
+    main(input_path, output_path)
