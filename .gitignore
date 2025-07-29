@@ -31,7 +31,7 @@ test_tube_exp/
 tests/tests_tt_dir/
 tests/save_dir
 default/   
-data/
+# data/
 test_tube_logs/
 test_tube_data/
 datasets/
@@ -130,3 +130,4 @@ MNIST
 
 logs/
 ckpt/
+camera_calibration/chessboard_images_9x6

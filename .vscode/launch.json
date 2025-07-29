@@ -30,14 +30,73 @@
         // "task=[optical_flow,depth]",
         "task=[bbox]"
       ]
-    }
+    },
     {
-      "name": "convert_frame_video",
+      "name": "pose3d",
       "type": "debugpy",
       "request": "launch",
-      "module": "analysis.convert_img_video",
+      "module": "project.main",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "prepare_data_2d_custom",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "VideoPose3D.data.prepare_data_2d_custom",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
+      "args": []
+    },
+    {
+      "name": "run_custom",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "VideoPose3D.run",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+        "-d",
+        // "custom",
+        "/workspace/data/custom_npz.npz",
+        "-k",
+        "myvideos",
+        "-arc",
+        "3,3,3,3,3",
+        "-c",
+        "checkpoint",
+        "--evaluate",
+        "/workspace/VideoPose3D/checkpoint/pretrained_h36m_detectron_coco.bin",
+        "--render",
+        "--viz-subject",
+        "run_3_osmo_2,run_3_osmo_1",
+        "--viz-action",
+        "custom",
+        "--viz-camera",
+        "0",
+        "--viz-video",
+        "/workspace/VideoPose3D/input_directory/osmo_2.mp4",
+        "--viz-output",
+        "/workspace/data/vis",
+        "--viz-size",
+        "6"
+      ]
+    },
+    {
+      "name": "camera_calibration",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "camera_calibration.calibration",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "triangulate",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "kpt_generation.main",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
     }
   ]
 }
