@@ -94,7 +94,7 @@
       "name": "triangulate",
       "type": "debugpy",
       "request": "launch",
-      "module": "kpt_generation.main",
+      "module": "kpt_generation.main2",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
     }

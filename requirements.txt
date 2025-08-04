@@ -24,3 +24,6 @@ rich
 av
 
 transformers
+
+opencv-python
+numpy
