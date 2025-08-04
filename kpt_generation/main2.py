@@ -98,7 +98,7 @@ def triangulate_joints(keypoints1, keypoints2, K, R, T):
         )
     P1 = K @ np.hstack((np.eye(3), np.zeros((3, 1))))
     P2 = K @ np.hstack((R, T.reshape(3, 1)))
-    pts_4d = cv2.triangulatePoints(P1, P2, keypoints1.T, keypoints2.T)
+    pts_4d = cv2.triangulatePoints(P1, P2, keypoints1[:2].T, keypoints2[:2].T)
     return (pts_4d[:3, :] / pts_4d[3, :]).T
 
 
@@ -229,15 +229,15 @@ def process_one_video(left_path, right_path, output_path):
 
         # if 0 value find in left or right keypoints, drop them
         # 把为0的点替换成 np.nan（防止误差）
-        l_kpt[l_kpt == 0] = np.nan
-        r_kpt[r_kpt == 0] = np.nan
+        # l_kpt[l_kpt == 0] = np.nan
+        # r_kpt[r_kpt == 0] = np.nan
 
         # 创建有效掩码：左右关键点都不是 nan 的点
-        valid_mask = ~np.isnan(l_kpt).any(axis=1) & ~np.isnan(r_kpt).any(axis=1)
+        # valid_mask = ~np.isnan(l_kpt).any(axis=1) & ~np.isnan(r_kpt).any(axis=1)
 
         # 过滤左右关键点
-        l_kpt = l_kpt[valid_mask]
-        r_kpt = r_kpt[valid_mask]
+        # l_kpt = l_kpt[valid_mask]
+        # r_kpt = r_kpt[valid_mask]
 
         l_frame = left_vframes[i] if left_vframes is not None else None
         r_frame = right_vframes[i] if right_vframes is not None else None
