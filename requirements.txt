@@ -27,3 +27,4 @@ transformers
 
 opencv-python
 numpy
+plotly
