@@ -102,6 +102,25 @@ def triangulate_joints(keypoints1, keypoints2, K, R, T):
     return (pts_4d[:3, :] / pts_4d[3, :]).T
 
 
+def visualize_3d_joints(joints_3d, R, T, save_path, title="Triangulated 3D Joints"):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    draw_camera(ax, np.eye(3), np.zeros(3), label="Cam1")
+    draw_camera(ax, R, T, label="Cam2")
+
+    ax.scatter(joints_3d[:, 0], joints_3d[:, 2], joints_3d[:, 1], c="blue", s=30)
+    for i, (x, y, z) in enumerate(joints_3d):
+        ax.text(x, z, y, str(i), size=8)
+    ax.set_title(title)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Z")
+    ax.set_zlabel("Y")
+    plt.tight_layout()
+    fig.savefig(save_path, dpi=300)
+    plt.close(fig)
+    print(f"[INFO] Saved: {save_path}")
+
+
 def visualize_3d_scene_interactive(joints_3d, R, T, save_path):
     fig = go.Figure()
     fig.add_trace(
@@ -241,8 +260,17 @@ def process_one_video(left_path, right_path, output_path):
             print(f"[WARN] Frame {i}: pose estimation failed")
             continue
         joints_3d = triangulate_joints(l_kpt, r_kpt, K, R, T)
+        visualize_3d_joints(
+            joints_3d,
+            R,
+            T,
+            os.path.join(output_path, f"frame_{i:04d}.png"),
+            title=f"Frame {i} - 3D Joints",
+        )
+        # 保存交互式3D场景
         html_path = os.path.join(output_path, f"scene_{i:04d}.html")
         visualize_3d_scene_interactive(joints_3d, R, T, html_path)
+
 
 
 # ---------- 多人批量处理入口 ----------
