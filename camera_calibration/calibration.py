@@ -15,7 +15,7 @@ import pandas as pd
 
 def prepare_object_points(board_size, square_size):
     objp = np.zeros((board_size[0] * board_size[1], 3), np.float32)
-    objp[:, :2] = np.mgrid[0:board_size[0], 0:board_size[1]].T.reshape(-1, 2)
+    objp[:, :2] = np.mgrid[0 : board_size[0], 0 : board_size[1]].T.reshape(-1, 2)
     return objp * square_size
 
 
@@ -45,7 +45,7 @@ def calibrate_camera_from_images(
     board_size=(8, 5),
     square_size=25.0,
     output_file=".calibration_parameters.npz",
-    vis_dir="visualization_output"
+    vis_dir="visualization_output",
 ):
     os.makedirs(vis_dir, exist_ok=True)
     objpoints, imgpoints, valid_images = [], [], []
@@ -111,14 +111,16 @@ if __name__ == "__main__":
     CHESSBOARD_SIZE = (8, 5)
     SQUARE_SIZE = 25.0
     IMAGE_DIR = "camera_calibration/chessboard_images_9x6"
+    VIDEO_DIR = "/workspace/code/camera_calibration/chessboard/video/DJI_20250831173129_0014_D.MP4"
     OUTPUT_FILE = "camera_calibration/calibration_parameters.npz"
+    VIS_DIR = "logs/calibration_vis"
 
     result = calibrate_camera_from_images(
         image_dir=IMAGE_DIR,
         board_size=CHESSBOARD_SIZE,
         square_size=SQUARE_SIZE,
         output_file=OUTPUT_FILE,
-        vis_dir="visualization_output"
+        vis_dir=VIS_DIR,
     )
 
     print("\n📌 Calibration Result Summary:")
