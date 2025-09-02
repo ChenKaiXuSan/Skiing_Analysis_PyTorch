@@ -21,7 +21,21 @@ import matplotlib.pyplot as plt
 import plotly.graph_objs as go
 import plotly.offline as py
 
-from kpt_generation.camera_position import estimate_camera_pose_from_sift_imgs, estimate_pose, to_gray_cv_image, visualize_SIFT_matches
+from triangulation.camera_position import (
+    estimate_camera_pose_from_sift_imgs,
+    estimate_camera_pose_from_kpt,
+    to_gray_cv_image,
+    visualize_SIFT_matches,
+)
+
+from triangulation.postprocess import (
+    post_triage_single,
+    post_triage_sequence,
+    plot_skeleton_3d,
+)
+
+from triangulation.reproject import reproject_and_visualize
+
 
 # ---------- 可视化工具 ----------
 def draw_and_save_keypoints_from_frame(
@@ -84,10 +98,22 @@ def draw_camera(ax, R, T, scale=0.1, label="Cam"):
 
 
 # ---------- 相机参数 ----------
+# K = np.array(
+#     [[1675.1430, 0.0, 880.9680], [0.0, 1286.3486, 1025.9397], [0.0, 0.0, 1.0]],
+#     dtype=np.float32,
+# )
+
+# * 这个是用录得视频推测的相机内参
 K = np.array(
-    [[1675.1430, 0.0, 880.9680], [0.0, 1286.3486, 1025.9397], [0.0, 0.0, 1.0]],
-    dtype=np.float32,
+    [
+        [1.10308405e03, 0.00000000e00, 9.47946068e02],
+        [0.00000000e00, 1.10601861e03, 5.31242592e02],
+        [0.00000000e00, 0.00000000e00, 1.00000000e00],
+    ]
 )
+
+K_dist = np.array([0.17697328, -0.45675065, -0.0026601, -0.00330938, 0.35538705])
+
 
 # ---------- 三角测量 ----------
 def triangulate_joints(keypoints1, keypoints2, K, R, T):
@@ -177,7 +203,6 @@ def visualize_3d_scene_interactive(joints_3d, R, T, save_path):
     print(f"[INFO] Saved interactive HTML to: {save_path}")
 
 
-
 # ---------- 加载关键点 ----------
 def load_keypoints_from_pt(file_path):
     if not os.path.exists(file_path):
@@ -191,24 +216,26 @@ def load_keypoints_from_pt(file_path):
         else None
     )
     keypoints = np.array(data["keypoint"]["keypoint"]).squeeze(0)
+    keypoints_score = np.array(data["keypoint"]["keypoint_score"]).squeeze(0)
     if keypoints.ndim != 3 or keypoints.shape[2] != 2:
         raise ValueError(f"Invalid shape: {keypoints.shape}")
     if vframes is not None:
         keypoints[:, :, 0] *= vframes.shape[2]
         keypoints[:, :, 1] *= vframes.shape[1]
-    return keypoints, vframes
+    return keypoints, keypoints_score, vframes
 
 
 # ---------- 主处理函数 ----------
 def process_one_video(left_path, right_path, output_path):
     os.makedirs(output_path, exist_ok=True)
-    left_kpts, left_vframes = load_keypoints_from_pt(left_path)
-    right_kpts, right_vframes = load_keypoints_from_pt(right_path)
+    left_kpts, left_kpts_score, left_vframes = load_keypoints_from_pt(left_path)
+    right_kpts, right_kpts_score, right_vframes = load_keypoints_from_pt(right_path)
 
     if left_kpts.shape[0] != right_kpts.shape[0]:
         raise ValueError(
             f"Frame mismatch: {left_kpts.shape[0]} vs {right_kpts.shape[0]}"
         )
+
     for i in range(min(6, left_kpts.shape[0])):
         l_kpt, r_kpt = left_kpts[i], right_kpts[i]
 
@@ -216,18 +243,6 @@ def process_one_video(left_path, right_path, output_path):
         assert (
             l_kpt.shape == r_kpt.shape
         ), f"Keypoints shape mismatch: {l_kpt.shape} vs {r_kpt.shape}"
-
-        # if 0 value find in left or right keypoints, drop them
-        # 把为0的点替换成 np.nan（防止误差）
-        # l_kpt[l_kpt == 0] = np.nan
-        # r_kpt[r_kpt == 0] = np.nan
-
-        # 创建有效掩码：左右关键点都不是 nan 的点
-        # valid_mask = ~np.isnan(l_kpt).any(axis=1) & ~np.isnan(r_kpt).any(axis=1)
-
-        # 过滤左右关键点
-        # l_kpt = l_kpt[valid_mask]
-        # r_kpt = r_kpt[valid_mask]
 
         l_frame = left_vframes[i] if left_vframes is not None else None
         r_frame = right_vframes[i] if right_vframes is not None else None
@@ -246,11 +261,23 @@ def process_one_video(left_path, right_path, output_path):
                 color=(0, 0, 255),
             )
 
+        # estimate camera position from imgs
         R, T, pts1, pts2, mask_pose = estimate_camera_pose_from_sift_imgs(
             to_gray_cv_image(l_frame),
             to_gray_cv_image(r_frame),
             K,
         )
+
+        # estimate camera position from kpts
+        R, T, mask_pose = estimate_camera_pose_from_kpt(
+            l_kpt,
+            r_kpt,
+            K,
+        )
+
+        T=-T
+        T = T / np.linalg.norm(T) * 10  # baseline_m 是两相机真实物理距离
+
 
         visualize_SIFT_matches(
             to_gray_cv_image(l_frame),
@@ -260,10 +287,7 @@ def process_one_video(left_path, right_path, output_path):
             os.path.join(output_path, f"sift_matches_{i:04d}.png"),
         )
 
-        # R, T, mask = estimate_pose(l_kpt, r_kpt, K)
-        if R is None or T is None:
-            print(f"[WARN] Frame {i}: pose estimation failed")
-            continue
+        # * 这里是没有过滤的3d pose
         joints_3d = triangulate_joints(l_kpt, r_kpt, K, R, T)
         visualize_3d_joints(
             joints_3d,
@@ -275,6 +299,55 @@ def process_one_video(left_path, right_path, output_path):
         # 保存交互式3D场景
         html_path = os.path.join(output_path, f"scene_{i:04d}.html")
         visualize_3d_scene_interactive(joints_3d, R, T, html_path)
+
+        # 已有：X3d  (T,J,3)  ← 你的三角测量输出
+        #       kptL,kptR (T,J,2)
+        #       K_left,K_right, dist_left, dist_right, R, T
+
+        # * 这里是过滤了的3d pose
+        # FIXME: 这里过滤之后的kpt是有问题的，需要修复
+        X_clean, rep = post_triage_single(
+            joints_3d,
+            l_kpt,
+            r_kpt,
+            K,
+            K,
+            R,
+            T,
+            dist1=K_dist,
+            dist2=K_dist,
+            confL=left_kpts_score[i],
+            confR=right_kpts_score[i],
+            conf_thr=0.3,
+            err_thresh_px=2.0,
+        )
+        print(rep)  # 看 rmse、pos_depth_ratio、kept_ratio
+
+        visualize_3d_joints(
+            X_clean,
+            R,
+            T,
+            os.path.join(output_path, f"frame_{i:04d}_filtered.png"),
+            title=f"Frame {i} - Filtered 3D",
+        )
+
+        res = reproject_and_visualize(
+            img1=left_vframes[i],
+            img2=right_vframes[i],
+            X3=joints_3d[i],
+            kptL=l_kpt,  # (J,2)
+            kptR=r_kpt,  # (J,2)
+            K1=K,
+            dist1=K_dist,
+            K2=K,
+            dist2=K_dist,
+            R=R,
+            T=T,  # 注意：T要用“有尺度”的（基线已缩放）
+            joint_names=None,  # 或者传 COCO 的关节名列表
+            out_path=os.path.join(output_path, f"reproj_{i:04d}.jpg"),
+        )
+    print(res["mean_err_L"], res["mean_err_R"])
+    print("Saved to:", res["out_path"])
 
 
 # ---------- 多人批量处理入口 ----------
@@ -289,10 +362,8 @@ def main_pt(input_root, output_root):
         left = os.path.join(person_dir, "osmo_1.pt")
         right = os.path.join(person_dir, "osmo_2.pt")
         out_dir = os.path.join(output_root, person_name)
-        try:
-            process_one_video(left, right, out_dir)
-        except Exception as e:
-            print(f"[ERROR] Failed: {person_name} – {e}")
+
+        process_one_video(left, right, out_dir)
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 
 
 # ---------- 姿态估计 ----------
-def estimate_pose(pts1, pts2, K):
+def estimate_camera_pose_from_kpt(pts1, pts2, K):
     E, mask = cv2.findEssentialMat(
         pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0
     )
@@ -61,8 +61,6 @@ def to_gray_cv_image(tensor_img):
         raise TypeError("只支持 float32 或 uint8 类型的输入")
 
     # 转灰度（OpenCV 格式）
-    import cv2
-
     img_gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     return img_gray
 
