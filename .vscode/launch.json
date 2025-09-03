@@ -14,8 +14,6 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "args": [
-        // "task=[optical_flow,depth]",
-        "task=[mask]",
         "device=1"
       ]
     },

@@ -66,43 +66,6 @@ class Preprocess:
         else:
             self.of_model = None
 
-    # def shape_check(self, check: list):
-    #     """
-    #     shape_check check the given value shape, and assert the shape.
-
-    #     check list include:
-    #     # batch, (b, c, t, h, w)
-    #     # bbox, (b, t, 4) (cxcywh)
-    #     # mask, (b, 1, t, h, w)
-    #     # keypoint, (b, t, 17, 2)
-    #     # optical_flow, (b, 2, t, h, w)
-
-    #     Args:
-    #         check (list): checked value, in list.
-    #     """
-
-    #     # first value in list is video, use this as reference.
-    #     t, h, w, c = check[0].shape
-
-    #     # frame check, we just need start from 1.
-    #     for ck in check[0:]:
-    #         if ck is None:
-    #             continue
-    #         # for label shape
-    #         if len(ck.shape) == 1:
-    #             assert ck.shape[0] == b
-    #         # for bbox shape
-    #         elif len(ck.shape) == 3:
-    #             assert ck.shape[0] == b and ck.shape[1] == t
-    #         # for mask shape and optical flow shape
-    #         elif len(ck.shape) == 5:
-    #             assert ck.shape[0] == b and (ck.shape[2] == t or ck.shape[2] == t - 1)
-    #         # for keypoint shape
-    #         elif len(ck.shape) == 4:
-    #             assert ck.shape[0] == b and ck.shape[1] == t and ck.shape[2] == 17
-    #         else:
-    #             raise ValueError("shape not match")
-
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 
         # * process depth
@@ -149,7 +112,5 @@ class Preprocess:
             mask = torch.empty(
                 (0, 1, vframes.shape[1], vframes.shape[2]), dtype=torch.float32
             )
-
-        # * shape check
 
         return bbox_none_index, optical_flow, bbox, mask, pose, pose_score, depth

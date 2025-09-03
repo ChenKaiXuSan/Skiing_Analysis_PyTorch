@@ -31,7 +31,7 @@ from torchvision.utils import flow_to_image
 from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
 
 
-from utils.utils import merge_frame_to_video
+from prepare_dataset.utils import merge_frame_to_video
 from torchvision.io import write_png
 
 
@@ -108,7 +108,9 @@ class OpticalFlow(nn.Module):
         person = video_path.parts[-2]
         video_name = video_path.stem
 
-        _save_path = Path(self.save_path) / "vis" / "img" / "optical_flow" / person / video_name
+        _save_path = (
+            Path(self.save_path) / "vis" / "img" / "optical_flow" / person / video_name
+        )
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
 

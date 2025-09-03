@@ -29,7 +29,7 @@ import logging
 import numpy as np
 from ultralytics import YOLO
 
-from utils.utils import merge_frame_to_video, process_none
+from prepare_dataset.utils import merge_frame_to_video, process_none
 
 logger = logging.getLogger(__name__)
 
