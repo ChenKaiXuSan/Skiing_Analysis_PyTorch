@@ -34,7 +34,12 @@ optical_flow:
 batch_size: 30
 device: 1
 
-task: ["pose", "mask", "bbox", "depth", "optical_flow"]
+task: ["pose", "mask", "bbox", "depth", "optical_flow", "detectron2"]
+
+detectron2:
+  cfg: "COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml"
+  score_thresh: 0.7
+  device: "cuda"
 
 bytetrack:
   # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license

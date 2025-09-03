@@ -14,7 +14,8 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "args": [
-        "device=1"
+        "device=1",
+        "task=[detectron2]",
       ]
     },
     {

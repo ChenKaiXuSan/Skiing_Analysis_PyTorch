@@ -28,7 +28,7 @@ from pathlib import Path
 import hydra
 from torchvision.io import read_video
  
-from prepare_dataset.preprocess import Preprocess
+from prepare_dataset.process.preprocess_yolo import Preprocess
 
 
 logger = logging.getLogger(__name__)
