@@ -1,7 +1,22 @@
-Camera Matrix:
-  [[1.10308405e+03 0.00000000e+00 9.47946068e+02]
-  [0.00000000e+00 1.10601861e+03 5.31242592e+02]
-  [0.00000000e+00 0.00000000e+00 1.00000000e+00]]
-Distortion Coefficients:
- [[ 0.17697328 -0.45675065 -0.0026601  -0.00330938  0.35538705]]
-Image Size: (1920, 1080)
+# hydra config
+hydra:
+  run:
+    dir: ${log_path}
+  job:
+    chdir: false
+
+pt_path: /workspace/data/pt
+log_path: logs/triangulated
+
+camera:
+  matrix:
+    - [1103.08405, 0.0, 947.946068]
+    - [0.0, 1106.01861, 531.242592]
+    - [0.0, 0.0, 1.0]
+  distortion_coefficients:
+    [0.17697328, -0.45675065, -0.0026601, -0.00330938, 0.35538705]
+  image_size: [1920, 1080]
+
+paths:
+  input: /workspace/data/pt
+  output: ${log_path}/3d_joints
