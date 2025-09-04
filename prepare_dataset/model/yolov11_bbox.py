@@ -1,38 +1,77 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-"""
-File: /workspace/code/prepare_dataset/yolov11 copy.py
-Project: /workspace/code/prepare_dataset
-Created Date: Tuesday June 3rd 2025
-Author: Kaixu Chen
------
-Comment:
 
-Have a good code time :)
------
-Last Modified: Tuesday June 3rd 2025 12:40:59 pm
-Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
------
-Copyright (c) 2025 The University of Tsukuba
------
-HISTORY:
-Date      	By	Comments
-----------	---	---------------------------------------------------------
-"""
+from __future__ import annotations
 
-from tqdm import tqdm
 from pathlib import Path
-
-import torch
-import cv2
+from typing import List, Optional, Sequence, Tuple
 
 import logging
-import numpy as np
+import torch
+import cv2
 from ultralytics import YOLO
+from tqdm import tqdm
 
-from prepare_dataset.utils import merge_frame_to_video, process_none
+from prepare_dataset.utils import process_none
 
 logger = logging.getLogger(__name__)
+
+
+def _to_thwc_rgb_uint8(vframes: torch.Tensor) -> torch.Tensor:
+    """
+    (T,H,W,C) or (T,C,H,W) -> (T,H,W,3) uint8 RGB (on CPU)
+    """
+    if not isinstance(vframes, torch.Tensor):
+        raise TypeError(f"vframes must be torch.Tensor, got {type(vframes)}")
+    if vframes.dim() != 4:
+        raise ValueError(f"vframes must be 4D, got {tuple(vframes.shape)}")
+
+    t = vframes.detach()
+    if t.is_cuda:
+        t = t.cpu()
+
+    # 通道整理到最后一维
+    if t.shape[-1] in (1, 3):  # (T,H,W,C)
+        pass
+    elif t.shape[1] in (1, 3):  # (T,C,H,W) -> (T,H,W,C)
+        t = t.permute(0, 2, 3, 1).contiguous()
+    else:
+        raise ValueError(f"Ambiguous channels in shape {tuple(t.shape)}")
+
+    # 灰度→RGB
+    if t.shape[-1] == 1:
+        t = t.repeat(1, 1, 1, 3)
+
+    # uint8/float* -> uint8[0,255]
+    if t.dtype == torch.uint8:
+        u8 = t
+    else:
+        if t.dtype not in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            t = t.float()
+        else:
+            t = t.float()
+        t = t.clamp(0, 255)
+        if t.max() <= 1.5:
+            t = t * 255.0
+        u8 = t.round().byte()
+
+    return u8  # (T,H,W,3) uint8 on CPU
+
+
+def _xyxy_center(box_xyxy: torch.Tensor) -> Tuple[float, float]:
+    """
+    box_xyxy: (4,) -> (cx, cy)
+    """
+    x1, y1, x2, y2 = box_xyxy.tolist()
+    return (float(x1 + x2) * 0.5, float(y1 + y2) * 0.5)
+
+
+def _areas_xyxy(boxes_xyxy: torch.Tensor) -> torch.Tensor:
+    """(N,4) -> (N,) areas"""
+    x1, y1, x2, y2 = boxes_xyxy.unbind(-1)
+    w = (x2 - x1).clamp_min(0)
+    h = (y2 - y1).clamp_min(0)
+    return w * h
 
 
 class YOLOv11Bbox:
@@ -41,205 +80,182 @@ class YOLOv11Bbox:
 
         # load model
         self.yolo_bbox = YOLO(configs.YOLO.bbox_ckpt)
-        self.tracking = configs.YOLO.tracking
+        self.tracking: bool = bool(configs.YOLO.tracking)
 
-        self.conf = configs.YOLO.conf
-        self.iou = configs.YOLO.iou
-        self.verbose = configs.YOLO.verbose
-        self.device = str(configs.device)
+        self.conf: float = float(configs.YOLO.conf)
+        self.iou: float = float(configs.YOLO.iou)
+        self.verbose: bool = bool(configs.YOLO.verbose)
+        self.device: str = str(configs.device)
 
-        self.img_size = configs.YOLO.img_size
+        self.img_size: int = int(configs.YOLO.img_size)
 
-        self.save = configs.YOLO.save
-        self.save_path = (
+        self.save: bool = bool(configs.YOLO.save)
+        self.save_path: Path = (
             Path(configs.extract_dataset.save_path) / "vis" / "yolo" / person
         )
-        self.batch_size = configs.batch_size
+        self.batch_size: int = int(getattr(configs, "batch_size", 1))
 
-    def get_YOLO_bbox_result(self, vframes: torch.Tensor):
-
-        vframes_numpy = vframes.numpy()
-        vframes_bgr = vframes_numpy[:, :, :, ::-1]
-        frame_list_bgr = [img for img in vframes_bgr]
+    @torch.inference_mode()
+    def get_YOLO_bbox_result(self, vframes: torch.Tensor) -> List:
+        """
+        统一把帧转成 RGB uint8 list，再转 BGR 给 YOLO；返回 list[Results]
+        """
+        thwc_rgb_u8 = _to_thwc_rgb_uint8(vframes)  # (T,H,W,3) uint8
+        frames_bgr = [
+            cv2.cvtColor(
+                thwc_rgb_u8[i].numpy(), cv2.COLOR_RGB2BGR
+            )  # list[np.ndarray BGR]
+            for i in range(thwc_rgb_u8.shape[0])
+        ]
 
         if self.tracking:
-
-            results = self.yolo_bbox.track(
-                source=frame_list_bgr,
+            stream = self.yolo_bbox.track(
+                source=frames_bgr,
                 conf=self.conf,
                 iou=self.iou,
-                classes=0,
+                classes=0,  # person
                 stream=True,
                 verbose=self.verbose,
-                device=self.device, # TODO: 这里的GPU没有按照指定的位置进行使用
-                # save=True,
-                # save_frames=True,
-                # save_conf=True,
-                # save_crop=True,
-                # project=self.save_path / "vis",
-                # name="bbox"
+                device=self.device,  # NOTE: Ultralytics 会解析字符串设备；如需精确绑核，可在外层设置 CUDA_VISIBLE_DEVICES
+                imgsz=self.img_size,
             )
         else:
-
-            results = self.yolo_bbox.predict(
-                source=frame_list_bgr,
+            stream = self.yolo_bbox.predict(
+                source=frames_bgr,
                 conf=self.conf,
                 iou=self.iou,
                 classes=0,
                 stream=True,
                 verbose=self.verbose,
                 device=self.device,
-                # save=True,
-                # save_frames=True,
-                # save_conf=True,
-                # save_crop=True,
-                # project=self.save_path / "vis",
-                # name="bbox"
+                imgsz=self.img_size,
             )
 
-        return results
+        return list(stream)  # 立刻收集，避免生成器被多次遍历的问题
 
+    @torch.inference_mode()
     def draw_and_save_boxes(
-        self, img_tensor: torch.Tensor, bboxes, save_path: Path, video_path: Path
+        self,
+        img_tensor: torch.Tensor,
+        bboxes: torch.Tensor,
+        save_path: Path,
+        video_path: Path,
     ):
+        """
+        img_tensor: (T,H,W,C) 或 (T,C,H,W)，float/uint8，RGB
+        bboxes: (T,4) xyxy on CPU
+        """
+        if not self.save:
+            return
 
         _video_name = video_path.stem
+        out_dir = save_path / "filter_img" / "bbox" / _video_name
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        # filter save path
-        _save_path = save_path / "filter_img" / "bbox" / _video_name
+        thwc_rgb_u8 = _to_thwc_rgb_uint8(img_tensor)  # (T,H,W,3) uint8 on CPU
+        T = thwc_rgb_u8.shape[0]
 
-        if not _save_path.exists():
-            _save_path.mkdir(parents=True, exist_ok=True)
-
-        for i, (img_tensor, xyxy) in tqdm(
-            enumerate(zip(img_tensor, bboxes)),
-            total=len(img_tensor),
-            desc="Draw and Save BBoxes",
-            leave=False,
-        ):
-
-            # 转换为 numpy 图像（H, W, C）
-            img_np = img_tensor.cpu().numpy()
-            if img_np.max() <= 1.0:
-                img_np = (img_np * 255).astype(np.uint8)
-            else:
-                img_np = img_np.astype(np.uint8)
-
-            x1, y1, x2, y2 = map(int, xyxy.tolist())
-
-            cv2.rectangle(
-                img_np,
-                (x1, y1),
-                (x2, y2),
-                (0, 255, 0),  # 绿色边框
-                2,
+        for i in tqdm(range(T), total=T, desc="Draw and Save BBoxes", leave=False):
+            img = thwc_rgb_u8[i].numpy().copy()  # RGB uint8
+            x1, y1, x2, y2 = map(int, bboxes[i].tolist())
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.imwrite(
+                str(out_dir / f"{i}_bbox_filter.jpg"),
+                cv2.cvtColor(img, cv2.COLOR_RGB2BGR),
             )
 
-            _img_save_path = Path(_save_path) / f"{i}_bbox_filter.jpg"
-            # 保存图像
-            cv2.imwrite(str(_img_save_path), cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR))
-
+    @torch.inference_mode()
     def __call__(self, vframes: torch.Tensor, video_path: Path):
+        """
+        Returns:
+            bbox: (T,4) xyxy  (device 与 vframes 一致)
+            none_index: List[int]
+            results: List[Results]
+        """
+        # device 对齐：最终把 bbox 放回输入 device
+        out_device = vframes.device
 
-        _video_name = video_path.stem
-
-        _save_path = self.save_path / "bbox" / _video_name
-        if not _save_path.exists():
-            _save_path.mkdir(parents=True, exist_ok=True)
-        _save_crop_path = self.save_path / "crop_bbox" / _video_name
-        if not _save_crop_path.exists():
-            _save_crop_path.mkdir(parents=True, exist_ok=True)
-
-        none_index = []
-        bbox_dict = {}
-
-        # * process bbox
+        # 推理
         results = self.get_YOLO_bbox_result(vframes)
+        T = vframes.shape[0]
 
-        for idx, r in tqdm(
-            enumerate(results), total=len(vframes), desc="YOLO BBox", leave=False
-        ):
+        none_index: List[int] = []
+        bbox_dict: dict[int, Optional[torch.Tensor]] = {}
 
-            # first frame bbox to tracking
-            if idx == 0 and r.boxes is not None and r.boxes.shape[0] > 0:
-                bbox_dict[idx] = r.boxes.xyxy[0]
+        prev_box: Optional[torch.Tensor] = None  # xyxy on CPU
 
-            # judge if have bbox.
-            elif r.boxes is None or r.boxes.shape[0] == 0:
+        for idx, r in tqdm(enumerate(results), total=T, desc="YOLO BBox", leave=False):
+            boxes_obj = getattr(r, "boxes", None)
+            if boxes_obj is None or boxes_obj.shape[0] == 0:
                 none_index.append(idx)
                 bbox_dict[idx] = None
+                continue
 
-            # if have only one bbox, we use the first one.
-            # FIXME: if the target lost the bbox, will save the other bbox.
-            elif r.boxes.shape[0] == 1:
-                bbox_dict[idx] = r.boxes.xyxy[0]
+            boxes_xyxy = boxes_obj.xyxy.detach().cpu()  # (N,4)
+            N = boxes_xyxy.shape[0]
 
-            elif r.boxes.shape[0] > 1:
+            # 单框：直接取
+            if N == 1:
+                chosen = boxes_xyxy[0]
+                bbox_dict[idx] = chosen
+                prev_box = chosen
+                continue
 
-                # * save the track history
-                if r.boxes and r.boxes.is_track:
+            # 多框：优先 track_id 匹配；否则与上一帧中心最近；再退化为面积最大
+            chosen: Optional[torch.Tensor] = None
+            try:
+                if (
+                    getattr(boxes_obj, "is_track", False)
+                    and boxes_obj.id is not None
+                    and prev_box is not None
+                ):
+                    # 这里没有上一帧 id 保持机制，退化为"中心最近"
+                    pass
+            except Exception:
+                pass
 
-                    x, y, w, h = bbox_dict[idx - 1]
-                    pre_box_center = [x, y]
-
-                    boxes = r.boxes.xyxy.cpu()
-                    track_ids = r.boxes.id.int().cpu().tolist()
-
-                    distance_list = []
-
-                    for box, track_id in zip(boxes, track_ids):
-
-                        x, y, w, h = box
-
-                        distance_list.append(
-                            torch.norm(
-                                torch.tensor([x, y]) - torch.tensor(pre_box_center)
-                            )
-                        )
-
-                    # find the closest bbox to the previous bbox
-                    closest_idx = np.argmin(distance_list)
-                    closest_box = boxes[closest_idx]
-                    bbox_dict[idx] = closest_box
-
-            else:
-                ValueError(
-                    f"the bbox shape is not correct, idx: {idx}, shape: {r.boxes.shape}"
+            if prev_box is not None:
+                cx_prev, cy_prev = _xyxy_center(prev_box)
+                centers = (boxes_xyxy[:, 0:2] + boxes_xyxy[:, 2:4]) * 0.5  # (N,2)
+                dists = torch.linalg.norm(
+                    centers - torch.tensor([cx_prev, cy_prev]), dim=1
                 )
+                best = int(torch.argmin(dists))
+                chosen = boxes_xyxy[best]
+            else:
+                # 首帧或丢失后重启：取面积最大
+                areas = _areas_xyxy(boxes_xyxy)
+                best = int(torch.argmax(areas))
+                chosen = boxes_xyxy[best]
 
-            r.save(filename=str(_save_path / f"{idx}_bbox.png"))
-            r.save_crop(save_dir=str(_save_crop_path), file_name=f"{idx}_bbox_crop.png")
+            bbox_dict[idx] = chosen
+            prev_box = chosen
 
-        # * process none index
+        # 缺失补齐
         if len(none_index) > 0:
             logger.warning(
-                f"the {video_path.stem} has {len(none_index)} frames without bbox."
+                "Video %s has %d frames without bbox.", video_path.stem, len(none_index)
             )
             bbox_dict = process_none(bbox_dict, none_index)
 
-        # convert bbox_dict to tensor
-        bbox = torch.stack(
-            [bbox_dict[k] for k in sorted(bbox_dict.keys())],
-            dim=0,
-        )
+        # 字典 -> 张量 (T,4)，并放回原 device
+        bbox_cpu = torch.stack(
+            [bbox_dict[k] for k in sorted(bbox_dict.keys())], dim=0
+        )  # CPU
+        bbox = bbox_cpu.to(out_device)
 
-        # * save the result to img
+        # 可视化
         if self.save:
-            # save the video frames to video file
-            # merge_frame_to_video(
-            #     self.save_path,
-            #     person=_person,
-            #     video_name=_video_name,
-            #     flag="bbox",
-            #     filter=False,
-            # )
-
-            # filter save path
-            self.draw_and_save_boxes(
-                img_tensor=vframes,
-                bboxes=bbox,
-                save_path=self.save_path,
-                video_path=video_path,
-            )
+            try:
+                self.draw_and_save_boxes(
+                    img_tensor=vframes,
+                    bboxes=bbox_cpu,  # 画图用 CPU
+                    save_path=self.save_path,
+                    video_path=video_path,
+                )
+            except Exception as e:
+                logger.exception(
+                    "draw_and_save_boxes failed for %s: %s", video_path.stem, e
+                )
 
         return bbox, none_index, results

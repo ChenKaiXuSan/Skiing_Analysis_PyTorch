@@ -1,39 +1,75 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-"""
-File: /workspace/code/Skiing_Analysis_PyTorch/preprocess/yolov8.py
-Project: /workspace/code/Skiing_Analysis_PyTorch/preprocess
-Created Date: Wednesday April 23rd 2025
-Author: Kaixu Chen
------
-Comment:
 
-Have a good code time :)
------
-Last Modified: Thursday April 24th 2025 4:30:44 pm
-Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
------
-Copyright (c) 2025 The University of Tsukuba
------
-HISTORY:
-Date      	By	Comments
-----------	---	---------------------------------------------------------
-"""
+from __future__ import annotations
 
-from tqdm import tqdm
 from pathlib import Path
+from typing import List, Optional, Tuple
 
-import torch
-import torch.nn.functional as F
-
-import cv2
 import logging
 import numpy as np
+import torch
+import torch.nn.functional as F
+import cv2
 from ultralytics import YOLO
+from tqdm import tqdm
 
-from prepare_dataset.utils import merge_frame_to_video, process_none
+from prepare_dataset.utils import process_none
 
 logger = logging.getLogger(__name__)
+
+
+def _to_thwc_rgb_uint8(vframes: torch.Tensor) -> torch.Tensor:
+    """
+    (T,H,W,C) or (T,C,H,W) -> (T,H,W,3) uint8 RGB (on CPU)
+    """
+    if not isinstance(vframes, torch.Tensor):
+        raise TypeError(f"vframes must be torch.Tensor, got {type(vframes)}")
+    if vframes.dim() != 4:
+        raise ValueError(f"vframes must be 4D, got {tuple(vframes.shape)}")
+
+    t = vframes.detach()
+    if t.is_cuda:
+        t = t.cpu()
+
+    # 通道整理到最后一维
+    if t.shape[-1] in (1, 3):            # (T,H,W,C)
+        pass
+    elif t.shape[1] in (1, 3):           # (T,C,H,W) -> (T,H,W,C)
+        t = t.permute(0, 2, 3, 1).contiguous()
+    else:
+        raise ValueError(f"Ambiguous channels in shape {tuple(t.shape)}")
+
+    # 灰度 -> RGB
+    if t.shape[-1] == 1:
+        t = t.repeat(1, 1, 1, 3)
+
+    # 统一到 uint8 [0,255]
+    if t.dtype == torch.uint8:
+        u8 = t
+    else:
+        if t.dtype not in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            t = t.float()
+        else:
+            t = t.float()
+        t = t.clamp(0, 255)
+        if t.max() <= 1.5:  # 认为是 0..1
+            t = t * 255.0
+        u8 = t.round().byte()
+
+    return u8  # (T,H,W,3) uint8
+
+
+def _xyxy_center(box_xyxy: torch.Tensor) -> Tuple[float, float]:
+    x1, y1, x2, y2 = box_xyxy.tolist()
+    return (float(x1 + x2) * 0.5, float(y1 + y2) * 0.5)
+
+
+def _areas_xyxy(boxes_xyxy: torch.Tensor) -> torch.Tensor:
+    x1, y1, x2, y2 = boxes_xyxy.unbind(-1)
+    w = (x2 - x1).clamp_min(0)
+    h = (y2 - y1).clamp_min(0)
+    return w * h
 
 
 class YOLOv11Mask:
@@ -42,218 +78,198 @@ class YOLOv11Mask:
 
         # load model
         self.yolo_mask = YOLO(configs.YOLO.seg_ckpt)
-        self.tracking = configs.YOLO.tracking
+        self.tracking: bool = bool(configs.YOLO.tracking)
 
-        self.conf = configs.YOLO.conf
-        self.iou = configs.YOLO.iou
-        self.verbose = configs.YOLO.verbose
-        self.img_size = configs.YOLO.img_size
+        self.conf: float = float(configs.YOLO.conf)
+        self.iou: float = float(configs.YOLO.iou)
+        self.verbose: bool = bool(configs.YOLO.verbose)
+        self.img_size: int = int(configs.YOLO.img_size)
 
-        self.device = str(configs.device)
+        self.device: str = str(configs.device)
 
-        self.save = configs.YOLO.save
-        self.save_path = (
-            Path(configs.extract_dataset.save_path) / "vis" / "yolo" / person
-        )
+        self.save: bool = bool(configs.YOLO.save)
+        self.save_path: Path = Path(configs.extract_dataset.save_path) / "vis" / "yolo" / person
 
-    def get_YOLO_mask_result(self, vframes: torch.Tensor):
-
-        vframes_numpy = vframes.numpy()
-        vframes_bgr = vframes_numpy[:, :, :, ::-1]
-        frame_list_bgr = [img for img in vframes_bgr]
+    @torch.inference_mode()
+    def get_YOLO_mask_result(self, vframes: torch.Tensor) -> List:
+        """
+        将帧转为 RGB uint8 列表，再转 BGR 给 YOLO；返回 list[Results]
+        """
+        thwc_rgb_u8 = _to_thwc_rgb_uint8(vframes)
+        frames_bgr = [cv2.cvtColor(thwc_rgb_u8[i].numpy(), cv2.COLOR_RGB2BGR)
+                      for i in range(thwc_rgb_u8.shape[0])]
 
         if self.tracking:
-            results = self.yolo_mask.track(
-                source=frame_list_bgr,
+            stream = self.yolo_mask.track(
+                source=frames_bgr,
                 conf=self.conf,
                 iou=self.iou,
-                classes=0,
+                classes=0,          # person
                 stream=True,
                 verbose=self.verbose,
                 device=self.device,
+                imgsz=self.img_size,
             )
         else:
-            results = self.yolo_mask(
-                source=frame_list_bgr,
+            stream = self.yolo_mask(
+                source=frames_bgr,
                 conf=self.conf,
                 iou=self.iou,
                 classes=0,
                 stream=True,
                 verbose=self.verbose,
                 device=self.device,
+                imgsz=self.img_size,
             )
+        return list(stream)
 
-        return results
-
-    def resize_masks_to_original(self, masks, orig_shape):
+    @staticmethod
+    def _resize_mask_to_orig(mask_hw: torch.Tensor, orig_shape: Tuple[int, int]) -> torch.Tensor:
         """
-        masks: [N, h, w]
+        mask_hw: (h, w) 概率/二值
         orig_shape: (H, W)
-        returns: [N, H, W]
+        returns: (1, H, W) float32
         """
+        m = mask_hw.unsqueeze(0).unsqueeze(0).float()      # (1,1,h,w)
+        m = F.interpolate(m, size=orig_shape, mode="bilinear", align_corners=False)
+        return m.squeeze(0)                                # (1,H,W)
 
-        masks = masks.unsqueeze(0).unsqueeze(0)  # [N, 1, h, w]
-        resized = F.interpolate(
-            masks, size=orig_shape, mode="bilinear", align_corners=False
-        )
-        return resized.squeeze(1)  # [N, H, W]
-
+    @torch.inference_mode()
     def draw_and_save_masks(
         self,
-        img_tensor: torch.Tensor,
-        masks: torch.Tensor,
+        img_tensor: torch.Tensor,     # (T,*,*,*)
+        masks: torch.Tensor,          # (T,1,H,W) float
         save_path: Path,
-        video_path: Path = None,
+        video_path: Path,
+        alpha: float = 0.5,
+        bin_thresh: float = 0.5,
     ):
+        if not self.save:
+            return
 
         _video_name = video_path.stem
-        _person = video_path.parts[-2]
+        out_dir = save_path / "filter_img" / "mask" / _video_name
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        # filter save path
-        _save_path = save_path / "filger_img" / "mask" / _video_name
+        thwc_rgb_u8 = _to_thwc_rgb_uint8(img_tensor)  # (T,H,W,3)
+        T, H, W, _ = thwc_rgb_u8.shape
 
-        if not _save_path.exists():
-            _save_path.mkdir(parents=True, exist_ok=True)
+        for i in tqdm(range(T), total=T, desc="Draw and Save Masks", leave=False):
+            img = thwc_rgb_u8[i].numpy()  # RGB uint8
+            mask = masks[i].squeeze(0).detach().cpu().numpy()  # (H,W) float
+            binary = (mask > bin_thresh).astype(np.uint8)
 
-        for i, (
-            img_tensor,
-            mask,
-        ) in tqdm(
-            enumerate(zip(img_tensor, masks)),
-            total=len(img_tensor),
-            desc="Draw and Save Masks",
-            leave=False,
-        ):
+            # 构造彩色遮罩 (RGB: 0,255,0)
+            color = np.zeros_like(img, dtype=np.uint8)
+            color[:, :, 1] = binary * 255
 
-            # 转为 numpy 图像 [H, W, 3]
-            img_np = img_tensor.cpu().numpy()
-            if img_np.max() <= 1.0:
-                img_np = (img_np * 255).astype(np.uint8)
-            else:
-                img_np = img_np.astype(np.uint8)
-            img_color = img_np.copy()
+            blended = cv2.addWeighted(img, 1.0, color, alpha, 0)
+            cv2.imwrite(str(out_dir / f"{i}_mask_filter.jpg"),
+                        cv2.cvtColor(blended, cv2.COLOR_RGB2BGR))
 
-            mask = mask.squeeze(0)  # [H, W]
-
-            # 生成随机颜色并叠加 mask
-            binary_mask = (mask > 0.5).float().cpu().numpy().astype(np.uint8)  # [H, W]
-            colored_mask = np.zeros_like(img_color, dtype=np.uint8)
-            for c in range(3):
-                colored_mask[:, :, c] = binary_mask * (0, 255, 0)[2 - c]  # RGB→BGR
-
-            img_color = cv2.addWeighted(img_color, 1.0, colored_mask, 0.5, 0)
-
-            # 保存图像
-            _img_save_path = Path(_save_path) / f"{i}_mask_filter.jpg"
-            cv2.imwrite(str(_img_save_path), cv2.cvtColor(img_color, cv2.COLOR_RGB2BGR))
-
-        # merge_frame_to_video(save_path, _person, _video_name, "mask", filter=True)
-
+    @torch.inference_mode()
     def __call__(self, vframes: torch.Tensor, video_path: Path):
-
-        _video_name = video_path.stem
-        _person = video_path.parts[-2]
-
-        _save_path = self.save_path / "mask" / _video_name
-        if not _save_path.exists():
-            _save_path.mkdir(parents=True, exist_ok=True)
-        _save_crop_path = self.save_path / "crop_mask" / _video_name
-        if not _save_crop_path.exists():
-            _save_crop_path.mkdir(parents=True, exist_ok=True)
-
-        none_index = []
-        bbox_dict = {}
-        mask_dict = {}
-
-        # * process bbox
+        """
+        Returns:
+            mask: (T,1,H,W) float32  (device 与 vframes 一致)
+            none_index: List[int]
+            results: List[Results]
+        """
+        out_device = vframes.device
         results = self.get_YOLO_mask_result(vframes)
+        T = vframes.shape[0]
 
-        for idx, r in tqdm(
-            enumerate(results), total=len(vframes), desc="YOLO Mask", leave=False
-        ):
+        none_index: List[int] = []
+        mask_dict: dict[int, Optional[torch.Tensor]] = {}
 
-            if idx == 0 and r.boxes is not None and r.boxes.shape[0] > 0:
-                # if the first frame, we just use the first bbox.
-                bbox_dict[idx] = r.boxes.xywh[0]
-                mask_dict[idx] = self.resize_masks_to_original(
-                    r.masks.data[0], r.masks.orig_shape
-                )
+        prev_box: Optional[torch.Tensor] = None  # xyxy on CPU
+        prev_id: Optional[int] = None
 
-            # judge if have bbox.
-            elif r.boxes is None or r.boxes.shape[0] == 0:
+        for idx, r in tqdm(enumerate(results), total=T, desc="YOLO Mask", leave=False):
+            boxes_obj = getattr(r, "boxes", None)
+            masks_obj = getattr(r, "masks", None)
+
+            if boxes_obj is None or boxes_obj.shape[0] == 0 or masks_obj is None:
                 none_index.append(idx)
-                bbox_dict[idx] = None  # empty tensor
-                mask_dict[idx] = None  # empty tensor
+                mask_dict[idx] = None
+                continue
 
-            elif r.boxes.shape[0] == 1:
-                # if have only one bbox, we use the first one.
-                bbox_dict[idx] = r.boxes.xywh[0]
-                mask_dict[idx] = self.resize_masks_to_original(
-                    r.masks.data[0], r.masks.orig_shape
-                )
+            boxes_xyxy = boxes_obj.xyxy.detach().cpu()  # (N,4)
+            N = boxes_xyxy.shape[0]
 
-            elif r.boxes.shape[0] > 1:
+            # 选择目标索引
+            chosen_i: Optional[int] = None
 
-                # * save the track history
-                if r.boxes and r.boxes.is_track:
-                    x, y, w, h = bbox_dict[idx - 1]
-                    pre_box_center = [x, y]
+            # 尝试优先同 track_id
+            try:
+                if getattr(boxes_obj, "is_track", False) and boxes_obj.id is not None and prev_id is not None:
+                    ids = boxes_obj.id.detach().cpu().numpy().astype(np.int64).tolist()
+                    if prev_id in ids:
+                        chosen_i = ids.index(prev_id)
+            except Exception:
+                pass
 
-                    boxes = r.boxes.xywh.cpu()
-                    track_ids = r.boxes.id.int().cpu().tolist()
+            if chosen_i is None:
+                if prev_box is not None and N > 0:
+                    cx_prev, cy_prev = _xyxy_center(prev_box)
+                    centers = (boxes_xyxy[:, 0:2] + boxes_xyxy[:, 2:4]) * 0.5
+                    dists = torch.linalg.norm(centers - torch.tensor([cx_prev, cy_prev]), dim=1)
+                    chosen_i = int(torch.argmin(dists))
+                else:
+                    # 首帧或丢失后重启：取面积最大的
+                    areas = _areas_xyxy(boxes_xyxy)
+                    chosen_i = int(torch.argmax(areas))
 
-                    distance_list = []
+            # 取对应 mask 并 resize 到原图
+            try:
+                mask_hw = masks_obj.data[chosen_i]               # (h,w) float
+                H, W = masks_obj.orig_shape                      # (H,W)
+                mask_1hw = self._resize_mask_to_orig(mask_hw, (H, W))  # (1,H,W)
+                mask_dict[idx] = mask_1hw.cpu()
+            except Exception as e:
+                logger.exception("Resize mask failed at frame %d: %s", idx, e)
+                none_index.append(idx)
+                mask_dict[idx] = None
 
-                    for box, track_id in zip(boxes, track_ids):
-                        x, y, w, h = box
+            # 更新 prev
+            prev_box = boxes_xyxy[chosen_i]
+            try:
+                prev_id = int(boxes_obj.id[chosen_i].item()) if boxes_obj.id is not None else None
+            except Exception:
+                prev_id = None
 
-                        distance_list.append(
-                            torch.norm(
-                                torch.tensor([x, y]) - torch.tensor(pre_box_center)
-                            )
-                        )
+            # YOLO 内置保存（仅在需要时）
+            if self.save:
+                try:
+                    save_dir = self.save_path / "img" / "mask" / video_path.stem
+                    crop_dir = self.save_path / "img" / "crop_mask" / video_path.stem
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    crop_dir.mkdir(parents=True, exist_ok=True)
+                    r.save(filename=str(save_dir / f"{idx}_mask.png"))
+                    r.save_crop(save_dir=str(crop_dir), file_name=f"{idx}_mask_crop.png")
+                except Exception:
+                    # 某些版本的 ultralytics Results.save 需要先设置 save_dir，这里保守忽略错误
+                    pass
 
-                    # find the closest bbox to the previous bbox
-                    closest_idx = np.argmin(distance_list)
-                    closest_box = boxes[closest_idx]
-                    bbox_dict[idx] = closest_box
-                    mask_dict[idx] = self.resize_masks_to_original(
-                        r.masks.data[closest_idx], r.masks.orig_shape
-                    )
-
-            else:
-                ValueError(
-                    f"the bbox shape is not correct, idx: {idx}, shape: {r.boxes.shape}"
-                )
-
-            r.save(filename=str(_save_path / f"{idx}_mask.png"))
-            r.save_crop(save_dir=str(_save_crop_path), file_name=f"{idx}_mask_crop.png")
-
-        # process none index
+        # 缺失帧回填
         if len(none_index) > 0:
-            logger.warning(
-                f"the {video_path.stem} has {len(none_index)} frames without bbox."
-            )
+            logger.warning("Video %s has %d frames without mask.", video_path.stem, len(none_index))
             mask_dict = process_none(mask_dict, none_index)
 
-        # convert dict to tensor
-        mask = torch.stack([mask_dict[k] for k in sorted(mask_dict.keys())], dim=0)
+        # 字典 -> 张量 (T,1,H,W)，并放回原 device
+        mask_cpu = torch.stack([mask_dict[k] for k in sorted(mask_dict.keys())], dim=0)  # CPU
+        mask = mask_cpu.to(out_device).float()
 
-        # * save the result to img
+        # 可视化（叠色保存）
         if self.save:
-            # save the video frames to video file
-            # merge_frame_to_video(
-            #     self.save_path,
-            #     person=video_path.parts[-2],
-            #     video_name=video_path.stem,
-            #     flag="mask",
-            # )
-
-            self.draw_and_save_masks(
-                img_tensor=vframes,
-                masks=mask,
-                save_path=self.save_path,
-                video_path=video_path,
-            )
+            try:
+                self.draw_and_save_masks(
+                    img_tensor=vframes,
+                    masks=mask_cpu,          # 画图用 CPU
+                    save_path=self.save_path,
+                    video_path=video_path,
+                )
+            except Exception as e:
+                logger.exception("draw_and_save_masks failed for %s: %s", video_path.stem, e)
 
         return mask, none_index, results

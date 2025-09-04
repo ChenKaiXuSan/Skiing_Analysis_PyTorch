@@ -13,8 +13,6 @@ from detectron2.engine import DefaultPredictor
 from detectron2.utils.visualizer import Visualizer, ColorMode
 from detectron2.data import MetadataCatalog
 
-from prepare_dataset.utils import process_none
-
 COCO_SKELETON = [
     (5, 7),
     (7, 9),  # 左臂
