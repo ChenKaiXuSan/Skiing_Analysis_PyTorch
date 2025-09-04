@@ -65,7 +65,8 @@ class YOLOv11Pose:
         self.conf = configs.YOLO.conf
         self.iou = configs.YOLO.iou
         self.verbose = configs.YOLO.verbose
-        self.device = configs.device
+
+        self.device = str(configs.device)
 
         self.img_size = configs.YOLO.img_size
 

@@ -15,7 +15,7 @@
       "console": "integratedTerminal",
       "args": [
         "device=1",
-        "task=[yolo]",
+        "task=[depth, optical_flow, yolo, detectron2]",
       ]
     },
     {

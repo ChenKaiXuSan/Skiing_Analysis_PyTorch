@@ -454,7 +454,6 @@ class Detectron2Wrapper:
         )
         root = Path(config.extract_dataset.save_path)
         self.save_dir = root / "vis" / "d2" / person
-        self.save_dir.mkdir(parents=True, exist_ok=True)
 
         self.save_vis = bool(getattr(config, "vis", True))
         self.vis_stride = int(getattr(config, "vis_stride", 1))

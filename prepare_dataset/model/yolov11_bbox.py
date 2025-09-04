@@ -46,7 +46,7 @@ class YOLOv11Bbox:
         self.conf = configs.YOLO.conf
         self.iou = configs.YOLO.iou
         self.verbose = configs.YOLO.verbose
-        self.device = f"cuda:{configs.device}"
+        self.device = str(configs.device)
 
         self.img_size = configs.YOLO.img_size
 
@@ -71,7 +71,7 @@ class YOLOv11Bbox:
                 classes=0,
                 stream=True,
                 verbose=self.verbose,
-                device=self.device,
+                device=self.device, # TODO: 这里的GPU没有按照指定的位置进行使用
                 # save=True,
                 # save_frames=True,
                 # save_conf=True,
