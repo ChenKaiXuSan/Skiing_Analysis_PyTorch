@@ -13,29 +13,29 @@ logger = logging.getLogger(__name__)
 
 
 class Preprocess:
-    def __init__(self, config) -> None:
+    def __init__(self, config, person: str) -> None:
         super(Preprocess, self).__init__()
 
         self.task = config.task
         logger.info(f"Preprocess task: {self.task}")
 
         if "depth" in self.task:
-            self.depth_estimator = DepthEstimator(config)
+            self.depth_estimator = DepthEstimator(config, person)
         else:
             self.depth_estimator = None
 
         if "optical_flow" in self.task:
-            self.of_model = OpticalFlow(config)
+            self.of_model = OpticalFlow(config, person)
         else:
             self.of_model = None
 
         if "yolo" in self.task:
-            self.yolo_model = PreprocessYOLO(config)
+            self.yolo_model = PreprocessYOLO(config, person)
         else:
             self.yolo_model = None
 
         if "detectron2" in self.task:
-            self.d2_model = PreprocessD2(config)
+            self.d2_model = PreprocessD2(config, person)
         else:
             self.d2_model = None
 
@@ -60,8 +60,8 @@ class Preprocess:
         # * process yolo
         if self.yolo_model:
             (
-                yolo_bbox,
                 bbox_none_index,
+                yolo_bbox,
                 yolo_mask,
                 yolo_keypoints,
                 yolo_keypoints_score,
@@ -77,26 +77,29 @@ class Preprocess:
 
         # * process detectron2
         if self.d2_model:
-            d2_bbox, d2_kpts, d2_kpts_score = self.d2_model(vframes, video_path)
+            d2_pose, d2_pose_score, d2_bboxes_xyxy, d2_none_index = self.d2_model(
+                vframes, video_path
+            )
         else:
-            d2_bbox = torch.empty((0, 5), dtype=torch.float32)
-            d2_kpts = torch.empty((0, 17, 3), dtype=torch.float32)
-            d2_kpts_score = torch.empty((0, 17), dtype=torch.float32)
+            d2_pose = torch.empty((0, 17, 3), dtype=torch.float32)
+            d2_pose_score = torch.empty((0, 17), dtype=torch.float32)
+            d2_bboxes_xyxy = torch.empty((0, 4), dtype=torch.float32)
+            d2_none_index = []
 
         pt_info = {
             "optical_flow": optical_flow.cpu(),
             "depth": depth.cpu(),
             "none_index": bbox_none_index,
             "YOLO": {
-                "bbox": yolo_bbox.cpu(),  # xywh
+                "bbox": yolo_bbox.cpu(),  # xyxy
                 "mask": yolo_mask.cpu(),
-                "keypoint": yolo_keypoints.cpu(),  # xyn
-                "keypoint_score": yolo_keypoints_score.cpu(),
+                "keypoints": yolo_keypoints.cpu(),  # xyn
+                "keypoints_score": yolo_keypoints_score.cpu(),  # n
             },
             "detectron2": {
-                "bbox": d2_bbox.cpu(),
-                "keypoints": d2_kpts.cpu(),
-                "keypoints_score": d2_kpts_score.cpu(),
+                "bbox": d2_bboxes_xyxy.cpu(),  # xyxy
+                "keypoints": d2_pose.cpu(),  # xyn
+                "keypoints_score": d2_pose_score.cpu(),  # n
             },
         }
 

@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 class OpticalFlow(nn.Module):
-    def __init__(self, param):
+    def __init__(self, param, person: str) -> None:
         super().__init__()
 
         self.weights = Raft_Large_Weights.DEFAULT
@@ -50,7 +50,9 @@ class OpticalFlow(nn.Module):
         self.model = raft_large(weights=self.weights, progress=False).to(self.device)
 
         self.save = param.optical_flow.save
-        self.save_path = Path(param.extract_dataset.save_path)
+        self.save_path = (
+            Path(param.extract_dataset.save_path) / "vis" / "optical_flow" / person
+        )
 
     def get_Optical_flow(self, frame_batch):
         """
@@ -105,12 +107,9 @@ class OpticalFlow(nn.Module):
         """
         Save the optical flow image to the specified path.
         """
-        person = video_path.parts[-2]
         video_name = video_path.stem
 
-        _save_path = (
-            Path(self.save_path) / "vis" / "img" / "optical_flow" / person / video_name
-        )
+        _save_path = Path(self.save_path) / video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
 
@@ -137,8 +136,9 @@ class OpticalFlow(nn.Module):
         if self.save:
             self.save_image(_pred_flow, video_path)
 
-            merge_frame_to_video(
-                self.save_path, video_path.parts[-2], video_path.stem, "optical_flow"
-            )
+            # TODO: 这里有问题需要修改一下
+            # merge_frame_to_video(
+            #     self.save_path, video_path.parts[-2], video_path.stem, "optical_flow"
+            # )
 
         return _pred_flow

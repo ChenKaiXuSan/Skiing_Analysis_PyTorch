@@ -32,7 +32,7 @@ from prepare_dataset.utils import merge_frame_to_video
 
 
 class DepthEstimator:
-    def __init__(self, configs):
+    def __init__(self, configs, person: str) -> None:
 
         model_name = configs.depth_estimator.model
 
@@ -46,7 +46,9 @@ class DepthEstimator:
         ).to(self.device)
 
         self.save = configs.depth_estimator.save
-        self.save_path = Path(configs.extract_dataset.save_path)
+        self.save_path = (
+            Path(configs.extract_dataset.save_path) / "vis" / "depth" / person
+        )
 
     def estimate_depth(self, frames: np.ndarray):
 
@@ -74,10 +76,9 @@ class DepthEstimator:
         Save the image to the specified path.
         """
 
-        person = video_path.parts[-2]
         video_name = video_path.stem
 
-        _save_path = self.save_path / "vis" / "img" / "depth" / person / video_name
+        _save_path = self.save_path / video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
 
@@ -106,9 +107,10 @@ class DepthEstimator:
 
             res_depth.append(depths.cpu())
 
-        if self.save:
-            merge_frame_to_video(
-                self.save_path, video_path.parts[-2], video_path.stem, "depth"
-            )
+        # if self.save:
+        # TODO: 这里需要修复一下
+        # merge_frame_to_video(
+        #     self.save_path, video_path.parts[-2], video_path.stem, "depth"
+        # )
 
         return torch.cat(res_depth, dim=0)

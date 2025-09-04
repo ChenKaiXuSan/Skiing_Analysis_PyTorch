@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 class YOLOv11Bbox:
-    def __init__(self, configs) -> None:
+    def __init__(self, configs, person: str) -> None:
         super().__init__()
 
         # load model
@@ -51,10 +51,12 @@ class YOLOv11Bbox:
         self.img_size = configs.YOLO.img_size
 
         self.save = configs.YOLO.save
-        self.save_path = Path(configs.extract_dataset.save_path)
+        self.save_path = (
+            Path(configs.extract_dataset.save_path) / "vis" / "yolo" / person
+        )
         self.batch_size = configs.batch_size
 
-    def get_YOLO_bbox_result(self, vframes: torch.Tensor, video_path: Path = None):
+    def get_YOLO_bbox_result(self, vframes: torch.Tensor):
 
         vframes_numpy = vframes.numpy()
         vframes_bgr = vframes_numpy[:, :, :, ::-1]
@@ -102,15 +104,14 @@ class YOLOv11Bbox:
     ):
 
         _video_name = video_path.stem
-        _person = video_path.parts[-2]
 
         # filter save path
-        _save_path = save_path / "vis" / "filter_img" / "bbox" / _person / _video_name
+        _save_path = save_path / "filter_img" / "bbox" / _video_name
 
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
 
-        for i, (img_tensor, xywh) in tqdm(
+        for i, (img_tensor, xyxy) in tqdm(
             enumerate(zip(img_tensor, bboxes)),
             total=len(img_tensor),
             desc="Draw and Save BBoxes",
@@ -124,13 +125,7 @@ class YOLOv11Bbox:
             else:
                 img_np = img_np.astype(np.uint8)
 
-            x_center, y_center, w, h = xywh
-
-            # 画框 + 标签
-            x1 = int(x_center - w / 2)
-            y1 = int(y_center - h / 2)
-            x2 = int(x_center + w / 2)
-            y2 = int(y_center + h / 2)
+            x1, y1, x2, y2 = map(int, xyxy.tolist())
 
             cv2.rectangle(
                 img_np,
@@ -144,19 +139,14 @@ class YOLOv11Bbox:
             # 保存图像
             cv2.imwrite(str(_img_save_path), cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR))
 
-        merge_frame_to_video(save_path, _person, _video_name, "bbox", filter=True)
-
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 
         _video_name = video_path.stem
-        _person = video_path.parts[-2]
 
-        _save_path = self.save_path / "vis" / "img" / "bbox" / _person / _video_name
+        _save_path = self.save_path / "bbox" / _video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
-        _save_crop_path = (
-            self.save_path / "vis" / "img" / "bbox_crop" / _person / _video_name
-        )
+        _save_crop_path = self.save_path / "crop_bbox" / _video_name
         if not _save_crop_path.exists():
             _save_crop_path.mkdir(parents=True, exist_ok=True)
 
@@ -172,7 +162,7 @@ class YOLOv11Bbox:
 
             # first frame bbox to tracking
             if idx == 0 and r.boxes is not None and r.boxes.shape[0] > 0:
-                bbox_dict[idx] = r.boxes.xywh[0]
+                bbox_dict[idx] = r.boxes.xyxy[0]
 
             # judge if have bbox.
             elif r.boxes is None or r.boxes.shape[0] == 0:
@@ -182,7 +172,7 @@ class YOLOv11Bbox:
             # if have only one bbox, we use the first one.
             # FIXME: if the target lost the bbox, will save the other bbox.
             elif r.boxes.shape[0] == 1:
-                bbox_dict[idx] = r.boxes.xywh[0]
+                bbox_dict[idx] = r.boxes.xyxy[0]
 
             elif r.boxes.shape[0] > 1:
 
@@ -192,7 +182,7 @@ class YOLOv11Bbox:
                     x, y, w, h = bbox_dict[idx - 1]
                     pre_box_center = [x, y]
 
-                    boxes = r.boxes.xywh.cpu()
+                    boxes = r.boxes.xyxy.cpu()
                     track_ids = r.boxes.id.int().cpu().tolist()
 
                     distance_list = []
@@ -236,13 +226,13 @@ class YOLOv11Bbox:
         # * save the result to img
         if self.save:
             # save the video frames to video file
-            merge_frame_to_video(
-                self.save_path,
-                person=_person,
-                video_name=_video_name,
-                flag="bbox",
-                filter=False,
-            )
+            # merge_frame_to_video(
+            #     self.save_path,
+            #     person=_person,
+            #     video_name=_video_name,
+            #     flag="bbox",
+            #     filter=False,
+            # )
 
             # filter save path
             self.draw_and_save_boxes(

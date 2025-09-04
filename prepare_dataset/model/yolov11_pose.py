@@ -55,7 +55,7 @@ COCO_SKELETON = [
 
 
 class YOLOv11Pose:
-    def __init__(self, configs) -> None:
+    def __init__(self, configs, person: str) -> None:
         super().__init__()
 
         # load model
@@ -70,7 +70,9 @@ class YOLOv11Pose:
         self.img_size = configs.YOLO.img_size
 
         self.save = configs.YOLO.save
-        self.save_path = Path(configs.extract_dataset.save_path)
+        self.save_path = (
+            Path(configs.extract_dataset.save_path) / "vis" / "yolo" / person
+        )
         self.batch_size = configs.batch_size
 
     def get_YOLO_pose_result(self, vframes: torch.Tensor):
@@ -113,10 +115,9 @@ class YOLOv11Pose:
     ):
 
         _video_name = video_path.stem
-        _person = video_path.parts[-2]
 
         # filter save path
-        _save_path = save_path / "vis" / "filter_img" / "pose" / _person / _video_name
+        _save_path = save_path / "filter_img" / "pose" / _video_name
 
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
@@ -154,18 +155,15 @@ class YOLOv11Pose:
             _img_save_path = Path(_save_path) / f"{idx}_pose_filter.jpg"
             cv2.imwrite(str(_img_save_path), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
-        merge_frame_to_video(save_path, _person, _video_name, "pose", filter=True)
+        # merge_frame_to_video(save_path, _person, _video_name, "pose", filter=True)
 
     def __call__(self, vframes: torch.Tensor, video_path: Path):
         _video_name = video_path.stem
-        _person = video_path.parts[-2]
 
-        _save_path = self.save_path / "vis" / "img" / "pose" / _person / _video_name
+        _save_path = self.save_path / "pose" / _video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
-        _save_crop_path = (
-            self.save_path / "vis" / "img" / "pose_crop" / _person / _video_name
-        )
+        _save_crop_path = self.save_path / "pose_crop" / _video_name
         if not _save_crop_path.exists():
             _save_crop_path.mkdir(parents=True, exist_ok=True)
 
@@ -243,7 +241,9 @@ class YOLOv11Pose:
             )
             # process none index, where from bbox_dict to instead the None value with next frame tensor (or froward frame tensor).
             pose_dict = process_none(batch_Dict=pose_dict, none_index=none_index)
-            pose_dict_score = process_none(batch_Dict=pose_dict_score, none_index=none_index)
+            pose_dict_score = process_none(
+                batch_Dict=pose_dict_score, none_index=none_index
+            )
             # bbox_dict = process_none(batch_Dict=bbox_dict, none_index=none_index)
 
         # convert dict to tensor
@@ -255,13 +255,13 @@ class YOLOv11Pose:
         # * save the result to img
         if self.save:
             # save the video frames to video file
-            merge_frame_to_video(
-                self.save_path,
-                person=_person,
-                video_name=_video_name,
-                flag="pose",
-                filter=False,
-            )
+            # merge_frame_to_video(
+            #     self.save_path,
+            #     person=_person,
+            #     video_name=_video_name,
+            #     flag="pose",
+            #     filter=False,
+            # )
 
             # filter save path
             self.draw_and_save_keypoints(

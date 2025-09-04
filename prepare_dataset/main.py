@@ -48,7 +48,7 @@ def process(parames, person: str):
     one_person = RAW_PATH / person
 
     # prepare the preprocess
-    preprocess = Preprocess(parames)
+    preprocess = Preprocess(config=parames, person=person)
 
     for one_video in one_person.iterdir():
 

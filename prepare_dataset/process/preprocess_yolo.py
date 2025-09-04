@@ -25,38 +25,26 @@ from pathlib import Path
 
 import torch
 
-from prepare_dataset.model.depth_estimation import DepthEstimator
-from prepare_dataset.model.optical_flow import OpticalFlow
+
 from prepare_dataset.model.yolov11_bbox import YOLOv11Bbox
 from prepare_dataset.model.yolov11_pose import YOLOv11Pose
 from prepare_dataset.model.yolov11_mask import YOLOv11Mask
-
-from prepare_dataset.model.detectron2 import Detectron2Wrapper
 
 logger = logging.getLogger(__name__)
 
 
 class PreprocessYOLO:
-    def __init__(self, config) -> None:
+    def __init__(self, config, person: str) -> None:
         super(PreprocessYOLO, self).__init__()
 
         self.task = config.task
         logger.info(f"Preprocess task: {self.task}")
 
-        if "bbox" in self.task:
-            self.yolo_model_bbox = YOLOv11Bbox(config)
-        else:
-            self.yolo_model_bbox = None
+        self.yolo_model_bbox = YOLOv11Bbox(config, person=person)
 
-        if "pose" in self.task:
-            self.yolo_model_pose = YOLOv11Pose(config)
-        else:
-            self.yolo_model_pose = None
+        self.yolo_model_pose = YOLOv11Pose(config, person=person)
 
-        if "mask" in self.task:
-            self.yolo_model_mask = YOLOv11Mask(config)
-        else:
-            self.yolo_model_mask = None
+        self.yolo_model_mask = YOLOv11Mask(config, person=person)
 
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 

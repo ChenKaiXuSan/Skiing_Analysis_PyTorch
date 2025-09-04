@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 class YOLOv11Mask:
-    def __init__(self, configs) -> None:
+    def __init__(self, configs, person: str) -> None:
         super().__init__()
 
         # load model
@@ -52,7 +52,9 @@ class YOLOv11Mask:
         self.device = configs.device
 
         self.save = configs.YOLO.save
-        self.save_path = Path(configs.extract_dataset.save_path)
+        self.save_path = (
+            Path(configs.extract_dataset.save_path) / "vis" / "yolo" / person
+        )
 
     def get_YOLO_mask_result(self, vframes: torch.Tensor):
 
@@ -108,7 +110,7 @@ class YOLOv11Mask:
         _person = video_path.parts[-2]
 
         # filter save path
-        _save_path = save_path / "vis" / "filter_img" / "mask" / _person / _video_name
+        _save_path = save_path / "filger_img" / "mask" / _video_name
 
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
@@ -145,19 +147,17 @@ class YOLOv11Mask:
             _img_save_path = Path(_save_path) / f"{i}_mask_filter.jpg"
             cv2.imwrite(str(_img_save_path), cv2.cvtColor(img_color, cv2.COLOR_RGB2BGR))
 
-        merge_frame_to_video(save_path, _person, _video_name, "mask", filter=True)
+        # merge_frame_to_video(save_path, _person, _video_name, "mask", filter=True)
 
     def __call__(self, vframes: torch.Tensor, video_path: Path):
 
         _video_name = video_path.stem
         _person = video_path.parts[-2]
 
-        _save_path = self.save_path / "vis" / "img" / "mask" / _person / _video_name
+        _save_path = self.save_path / "mask" / _video_name
         if not _save_path.exists():
             _save_path.mkdir(parents=True, exist_ok=True)
-        _save_crop_path = (
-            self.save_path / "vis" / "img" / "mask_crop" / _person / _video_name
-        )
+        _save_crop_path = self.save_path / "crop_mask" / _video_name
         if not _save_crop_path.exists():
             _save_crop_path.mkdir(parents=True, exist_ok=True)
 
@@ -242,12 +242,12 @@ class YOLOv11Mask:
         # * save the result to img
         if self.save:
             # save the video frames to video file
-            merge_frame_to_video(
-                self.save_path,
-                person=video_path.parts[-2],
-                video_name=video_path.stem,
-                flag="mask",
-            )
+            # merge_frame_to_video(
+            #     self.save_path,
+            #     person=video_path.parts[-2],
+            #     video_name=video_path.stem,
+            #     flag="mask",
+            # )
 
             self.draw_and_save_masks(
                 img_tensor=vframes,

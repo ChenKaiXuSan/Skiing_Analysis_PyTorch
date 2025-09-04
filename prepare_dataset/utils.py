@@ -185,6 +185,6 @@ def process_none(batch_Dict: dict[torch.Tensor], none_index: list):
             if next_idx < boundary:
                 filter_batch[i] = batch_Dict[next_idx]
             else:
-                filter_batch[i] = batch_Dict[boundary-1]
+                filter_batch[i] = batch_Dict[boundary - 1]
 
     return filter_batch
