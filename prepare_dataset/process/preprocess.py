@@ -172,7 +172,7 @@ class Preprocess:
             },
         }
 
-        report = check_pt_info_shapes(pt_info, strict=False, logger=logger)
+        report = check_pt_info_shapes(pt_info, strict=False, logger=logger, check_frames=False)
         if not report["ok"]:
             logger.warning("pt_info shape issues: %s", report["problems"])
 
@@ -189,10 +189,14 @@ def check_pt_info_shapes(
     allow_empty: bool = True,
     strict: bool = False,
     logger: Optional[logging.Logger] = None,
+    # 新增：是否校验 frames；当只有 frames_path 时是否尝试加载
+    check_frames: bool = True,
+    load_external_frames: bool = True,
 ) -> Dict[str, Any]:
     """
     校验 Preprocess.__call__ 返回的 pt_info 的形状与一致性。
-    当仅有光流时，可自动推断 T = flow_T + 1。
+    - 当仅有光流时，可自动推断 T = flow_T + 1。
+    - 现在也会校验 frames (THWC)，或在仅有 frames_path 时可选加载后校验。
 
     Returns:
         {"ok": bool, "T": int|None, "H": int|None, "W": int|None, "problems": [str, ...]}
@@ -229,12 +233,15 @@ def check_pt_info_shapes(
     d2_kpt = d2.get("keypoints", None)
     d2_kpt_s = d2.get("keypoints_score", None)
 
+    # frames / frames_path
+    frames = pt_info.get("frames", None)
+    frames_path = pt_info.get("video_path", None)
+
     # -------- infer T/H/W --------
     T_exact_cands: List[int] = (
         []
-    )  # 这些张量的第 0 维就是 T：depth/mask/bbox/kp/kp_score
+    )  # 这些张量的第 0 维就是 T：depth/mask/bbox/kp/kp_score/frames
     T_flow_cands: List[int] = []  # flow 的第 0 维是 T-1
-
     Hcands: List[int] = []
     Wcands: List[int] = []
 
@@ -250,7 +257,6 @@ def check_pt_info_shapes(
         if t.dim() == 4:  # e.g., depth/mask/flow
             if is_flow:
                 T_flow_cands.append(int(t.shape[0]))
-                # 通道检查
                 if expect_c is not None and t.shape[1] != expect_c:
                     _warn(
                         f"optical_flow 通道数应为 {expect_c}，实际 {t.shape[1]} @ {_shape(t)}"
@@ -278,10 +284,18 @@ def check_pt_info_shapes(
     _collect_THW(d2_kpt)
     _collect_THW(d2_kpt_s)
 
-    # T 推断策略：
-    # 1) 有“严格等于 T”的候选时，取其最大值（通常一致）；
-    # 2) 否则如果只有光流，T = flow_T + 1；
-    # 3) 都没有则 None。
+    # 把 frames 也纳入 T/H/W 推断（注意它是 THWC，不走 expect_c 检查）
+    if (
+        check_frames
+        and _is_tensor(frames)
+        and (not (allow_empty and _is_empty_tensor(frames)))
+    ):
+        if frames.dim() == 4:
+            T_exact_cands.append(int(frames.shape[0]))
+            Hcands.append(int(frames.shape[1]))
+            Wcands.append(int(frames.shape[2]))
+
+    # T 推断策略
     if T is not None:
         T_infer = T
     elif T_exact_cands:
@@ -325,7 +339,7 @@ def check_pt_info_shapes(
             if W_infer is not None and flow.shape[3] != W_infer:
                 _warn(f"optical_flow W {flow.shape[3]} 与 W={W_infer} 不一致")
 
-    # YOLO: bbox (T,4), mask (T,1,H,W), keypoints (T,K,2|3), score (T,K)
+    # YOLO
     if _is_tensor(y_bbox) and (not (allow_empty and _is_empty_tensor(y_bbox))):
         if y_bbox.dim() != 2 or y_bbox.shape[1] != 4:
             _warn(f"YOLO.bbox 应为 (T,4)，实际 {_shape(y_bbox)}")
@@ -355,7 +369,7 @@ def check_pt_info_shapes(
         elif T_infer is not None and y_kpt_s.shape[0] != T_infer:
             _warn(f"YOLO.keypoints_score T={y_kpt_s.shape[0]} 与 T={T_infer} 不一致")
 
-    # Detectron2: 同 YOLO
+    # Detectron2
     if _is_tensor(d2_bbox) and (not (allow_empty and _is_empty_tensor(d2_bbox))):
         if d2_bbox.dim() != 2 or d2_bbox.shape[1] != 4:
             _warn(f"detectron2.bbox 应为 (T,4)，实际 {_shape(d2_bbox)}")
@@ -381,6 +395,33 @@ def check_pt_info_shapes(
             _warn(
                 f"detectron2.keypoints_score T={d2_kpt_s.shape[0]} 与 T={T_infer} 不一致"
             )
+
+    # frames 校验（THWC）
+    if check_frames:
+        _frames = frames
+        if _frames is None and isinstance(frames_path, str) and load_external_frames:
+            try:
+                _frames = torch.load(frames_path, map_location="cpu")
+            except Exception as e:
+                _warn(f"无法加载 frames_path: {frames_path}，原因：{e}")
+
+        if _is_tensor(_frames) and (not (allow_empty and _is_empty_tensor(_frames))):
+            if _frames.dim() != 4:
+                _warn(f"frames 维度应为 4(THWC)，实际 {_shape(_frames)}")
+            else:
+                t, h, w, c = _frames.shape
+                if c not in (1, 3):
+                    _warn(f"frames 通道 C 应为 1 或 3，实际 {c}")
+                # dtype 建议为 uint8；若为 float，也给出提示
+                if _frames.dtype != torch.uint8:
+                    _warn(f"frames dtype 建议为 uint8，实际 {_frames.dtype}")
+
+                if T_infer is not None and t != T_infer:
+                    _warn(f"frames T={t} 与 T={T_infer} 不一致")
+                if H_infer is not None and h != H_infer:
+                    _warn(f"frames H={h} 与 H={H_infer} 不一致")
+                if W_infer is not None and w != W_infer:
+                    _warn(f"frames W={w} 与 W={W_infer} 不一致")
 
     # none_index 范围检查
     if isinstance(none_index, (list, tuple)):
