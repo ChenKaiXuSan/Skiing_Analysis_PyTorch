@@ -10,7 +10,7 @@
       "name": "prepare_dataset",
       "type": "debugpy",
       "request": "launch",
-      "module": "prepare_dataset.main",
+      "module": "prepare_dataset.main copy",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "args": [

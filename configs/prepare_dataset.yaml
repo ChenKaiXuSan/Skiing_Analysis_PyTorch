@@ -27,6 +27,8 @@ depth_estimator:
 extract_dataset:
   data_path: "/workspace/data/side_raw" # this is raw data path.
   save_path: "/workspace/data/" # this is extracted video path.
+  overwrite: true
+  embed_frames_in_pt: true
 
 optical_flow:
   save: true
