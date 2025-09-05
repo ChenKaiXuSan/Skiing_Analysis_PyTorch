@@ -14,13 +14,15 @@ import cv2
 import glob
 import hydra
 
-from triangulation.camera_position import (
+from triangulation.camera_position.camera_position import (
     estimate_camera_pose_from_sift_imgs,
     estimate_camera_pose_from_kpt,
     to_gray_cv_image,
 )
 
-from triangulation.load import load_keypoints_from_pt
+from triangulation.camera_position.SIFT_kpt import estimate_camera_pose_hybrid
+
+from triangulation.load import load_keypoints_from_d2_pt, load_keypoints_from_yolo_pt
 
 from triangulation.reproject import reproject_and_visualize
 
@@ -73,8 +75,15 @@ def triangulate_joints(keypoints1, keypoints2, K, R, T):
 # ---------- 主处理函数 ----------
 def process_one_video(left_path, right_path, output_path):
     os.makedirs(output_path, exist_ok=True)
-    left_kpts, left_kpts_score, left_vframes = load_keypoints_from_pt(left_path)
-    right_kpts, right_kpts_score, right_vframes = load_keypoints_from_pt(right_path)
+
+    # YOLO 关键点加载
+    # left_kpts, left_kpts_score, left_vframes = load_keypoints_from_yolo_pt(left_path)
+    # right_kpts, right_kpts_score, right_vframes = load_keypoints_from_yolo_pt(
+    #     right_path
+    # )
+    # D2 关键点加载
+    left_kpts, left_kpts_score, left_vframes = load_keypoints_from_d2_pt(left_path)
+    right_kpts, right_kpts_score, right_vframes = load_keypoints_from_d2_pt(right_path)
 
     if left_kpts.shape[0] != right_kpts.shape[0]:
         raise ValueError(
@@ -107,41 +116,66 @@ def process_one_video(left_path, right_path, output_path):
             )
 
         # estimate camera position from imgs
-        R, T, pts1, pts2, mask_pose = estimate_camera_pose_from_sift_imgs(
-            to_gray_cv_image(l_frame),
-            to_gray_cv_image(r_frame),
-            K,
-        )
+        # R, T, pts1, pts2, mask_pose = estimate_camera_pose_from_sift_imgs(
+        #     to_gray_cv_image(l_frame),
+        #     to_gray_cv_image(r_frame),
+        #     K,
+        # )
 
         # estimate camera position from kpts
-        R, T, mask_pose = estimate_camera_pose_from_kpt(
-            l_kpt,
-            r_kpt,
+        # R, T, mask_pose = estimate_camera_pose_from_kpt(
+        #     l_kpt,
+        #     r_kpt,
+        #     K,
+        # )
+
+        # K 同一台内参；若两台不同，请自行改成 K1/K2 并分别归一化
+        R, T, info = estimate_camera_pose_hybrid(
+            l_frame,
+            r_frame,
             K,
+            kpt1=l_kpt,
+            kpt2=r_kpt,
+            kpt_score1=left_kpts_score[i],
+            kpt_score2=right_kpts_score[i],
+            score_thresh=0.4,
+            sift_ratio=0.75,
+            magsac_thresh=1e-3,
+            kpt_boost=3,
+            refine=True,
         )
+        print(info["n_sift"], info["n_kpt"], info["n_inlier"])
 
-        T = -T
-        T = T / np.linalg.norm(T) * 50  # baseline_m 是两相机真实物理距离
-
-        visualize_SIFT_matches(
-            to_gray_cv_image(l_frame),
-            to_gray_cv_image(r_frame),
-            pts1,
-            pts2,
-            os.path.join(output_path, "SIFT"),
-            i,
-        )
+        # * COLMAP 
+        # visualize_SIFT_matches(
+        #     to_gray_cv_image(l_frame),
+        #     to_gray_cv_image(r_frame),
+        #     pts1,
+        #     pts2,
+        #     os.path.join(output_path, "SIFT"),
+        #     i,
+        # )
 
         # * 这里是没有过滤的3d pose
         joints_3d = triangulate_joints(l_kpt, r_kpt, K, R, T)
 
+        def cam_to_world(R, T, Xc):
+            R = R.T
+            T = -R @ T.reshape(3)
+            return (R @ Xc.T).T + T
+
+        X_world = cam_to_world(R, T, joints_3d)
+
+        # * 可视化3d关节
         visualize_3d_joints(
-            joints_3d,
+            X_world,
             R,
             T,
             os.path.join(output_path, "3d", f"frame_{i:04d}.png"),
             title=f"Frame {i} - 3D Joints",
+            # y_up=True,
         )
+
         # * 可视化相机的位置
         save_camera(R, T, os.path.join(output_path, "camera"), f"camera_{i:04d}.png")
 

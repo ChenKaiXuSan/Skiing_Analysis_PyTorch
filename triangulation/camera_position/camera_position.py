@@ -22,10 +22,6 @@ Date      	By	Comments
 import numpy as np
 import cv2
 import torch
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 
 # ---------- 姿态估计 ----------
