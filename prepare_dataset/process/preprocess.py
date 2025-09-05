@@ -172,7 +172,9 @@ class Preprocess:
             },
         }
 
-        report = check_pt_info_shapes(pt_info, strict=False, logger=logger, check_frames=False)
+        report = check_pt_info_shapes(
+            pt_info, strict=False, logger=logger, check_frames=False
+        )
         if not report["ok"]:
             logger.warning("pt_info shape issues: %s", report["problems"])
 
