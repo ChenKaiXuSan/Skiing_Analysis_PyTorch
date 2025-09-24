@@ -26,6 +26,20 @@ import torch
 
 # ---------- 姿态估计 ----------
 def estimate_camera_pose_from_kpt(pts1, pts2, K):
+    """从关键点估计相机姿态（R, t）
+    这里的pts1是左边的视角，pts2是右边的视角
+
+    Args:
+        pts1 (np.ndarray): 第一帧关键点 (N, 2)
+        pts2 (np.ndarray): 第二帧关键点 (N, 2)
+        K (np.ndarray): 相机内参矩阵 (3, 3)
+
+    Returns:
+        R (np.ndarray): 旋转矩阵 (3, 3)
+        t (np.ndarray): 平移向量 (3, 1)
+        mask_pose (np.ndarray): 有效匹配掩码
+    """
+
     E, mask = cv2.findEssentialMat(
         pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0
     )
@@ -61,7 +75,7 @@ def to_gray_cv_image(tensor_img):
     return img_gray
 
 
-def estimate_camera_pose_from_sift_imgs(img1, img2, K, ratio_thresh=0.75):
+def estimate_camera_pose_from_SIFT(img1, img2, K, ratio_thresh=0.75):
     """
     使用 SIFT 特征从两幅图像中估计相机相对姿态（R, T）
 
@@ -79,8 +93,8 @@ def estimate_camera_pose_from_sift_imgs(img1, img2, K, ratio_thresh=0.75):
         mask_pose: np.ndarray, 有效匹配掩码
     """
 
-    if img1 is None or img2 is None or len(img1.shape) != 2 or len(img2.shape) != 2:
-        raise ValueError("输入图像必须是灰度图，并且不能为空")
+    img1 = to_gray_cv_image(img1)
+    img2 = to_gray_cv_image(img2)
 
     # Step 1: 提取 SIFT 特征
     sift = cv2.SIFT_create()
@@ -112,3 +126,56 @@ def estimate_camera_pose_from_sift_imgs(img1, img2, K, ratio_thresh=0.75):
     _, R, T, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
 
     return R, T, pts1, pts2, mask_pose
+
+
+def estimate_camera_pose_from_ORB(img1, img2, K, max_matches=1000):
+    """
+    估计相邻帧之间的相机相对位姿（R, t方向, 欧拉角）
+
+    参数:
+        img1, img2 : ndarray
+            两帧灰度图像 (H, W)。
+            两帧灰度图像 (H, W)。
+        K : ndarray (3x3)
+            相机内参矩阵。
+        max_matches : int
+            用于估计的最大匹配数量，默认 1000。
+
+    返回:
+        R : ndarray (3x3)
+            从 img1 到 img2 的旋转矩阵。
+        t_dir : ndarray (3,)
+            单位化的平移方向向量（无尺度）。
+        euler : tuple (yaw, pitch, roll) [degrees]
+            从 R 转换得到的欧拉角（ZYX顺序）。
+    """
+    img1 = to_gray_cv_image(img1)
+    img2 = to_gray_cv_image(img2)
+    # --- Step1: 特征检测和描述 ---
+    orb = cv2.ORB_create(3000)
+    kp1, des1 = orb.detectAndCompute(img1, None)
+    kp2, des2 = orb.detectAndCompute(img2, None)
+
+    # --- Step2: 暴力匹配（汉明距离，交叉验证） ---
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    matches = bf.match(des1, des2)
+    matches = sorted(matches, key=lambda x: x.distance)[:max_matches]
+
+    pts1 = np.float32([kp1[m.queryIdx].pt for m in matches])
+    pts2 = np.float32([kp2[m.trainIdx].pt for m in matches])
+
+    # --- Step3: 本质矩阵 + R,t ---
+    E, inliers = cv2.findEssentialMat(
+        pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0
+    )
+    inlier_mask = inliers.ravel() == 1
+    pts1, pts2 = pts1[inlier_mask], pts2[inlier_mask]
+
+    _, R, t, _ = cv2.recoverPose(E, pts1, pts2, K)
+
+    # --- Step4: 计算欧拉角 (ZYX顺序: yaw,pitch,roll) ---
+    yaw = np.degrees(np.arctan2(R[1, 0], R[0, 0]))
+    pitch = np.degrees(np.arcsin(-R[2, 0]))
+    roll = np.degrees(np.arctan2(R[2, 1], R[2, 2]))
+
+    return R, (t / np.linalg.norm(t)).ravel(), (yaw, pitch, roll)

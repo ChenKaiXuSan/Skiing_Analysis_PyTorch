@@ -57,7 +57,7 @@ def save_camera_positions_3d(
     save_path,
     labels=None,
     convention="opencv",
-    draw_frustum=False,
+    draw_frustum=True,
     K=None,
     image_size=None,
     frustum_depth=0.5,
@@ -153,15 +153,41 @@ def save_camera_positions_topdown(
     title="Camera Layout (Top-Down XZ)",
 ):
     """
-    俯视图：把相机在 X–Z 平面的位置和朝向画成 2D 图片并保存。
-    朝向用相机系的 -Z 方向（光轴）在世界中的投影表示。
-    """
-    N = len(R_list)
-    labels = labels or [f"Cam{i+1}" for i in range(N)]
+    在 X–Z 平面绘制相机的俯视布局并保存。
 
-    plt.figure(figsize=(6, 6))
-    ax = plt.gca()
-    centers = []
+    参数
+    ----
+    R_list : list of (3,3) ndarray
+        相机的旋转矩阵 (world->cam, OpenCV convention)。
+    T_list : list of (3,) or (3,1) ndarray
+        相机的平移向量。
+    save_path : str
+        输出图片路径。
+    labels : list of str or None
+        每个相机的名字；None 时自动编号。
+    convention : {"opencv", "opengl"}
+        外参的定义方式：
+        - "opencv": x右, y下, z前，相机矩阵 [R|T]，中心 C=-R.T@T
+        - "opengl": x右, y上, z后，相机矩阵 [R|T]，中心 C=-R@T
+    arrow_len : float
+        光轴箭头的长度。
+    title : str
+        图标题。
+
+    返回
+    ----
+    centers : (N,3) ndarray
+        相机中心坐标。
+    look_dirs : (N,3) ndarray
+        相机光轴方向（世界系）。
+    """
+
+    N = len(R_list)
+    if labels is None:
+        labels = [f"Cam{i+1}" for i in range(N)]
+
+    centers, look_dirs = [], []
+    fig, ax = plt.subplots(figsize=(6, 6))
 
     for R, T, name in zip(R_list, T_list, labels):
         R = np.asarray(R).reshape(3, 3)
@@ -170,9 +196,10 @@ def save_camera_positions_topdown(
 
         # 光轴方向（相机系 -Z）
         Rc2w = R.T if convention.lower() == "opencv" else R
-        look_dir_w = Rc2w @ np.array([0, 0, -1.0])  # 方向向量
-        # 只画 XZ 平面的投影
-        ax.scatter(C[0], C[2], s=30)
+        look_dir_w = Rc2w @ np.array([0, 0, 1.0])
+        look_dirs.append(look_dir_w)
+
+        ax.scatter(C[0], C[2], s=30, c="k")
         ax.annotate(name, (C[0], C[2]), textcoords="offset points", xytext=(5, 5))
         ax.arrow(
             C[0],
@@ -181,26 +208,30 @@ def save_camera_positions_topdown(
             look_dir_w[2] * arrow_len,
             head_width=arrow_len * 0.15,
             length_includes_head=True,
+            color="r",
+            alpha=0.7,
         )
 
     centers = np.vstack(centers)
+    look_dirs = np.vstack(look_dirs)
+
+    ax.set_xlim(-2, 2)
+    ax.set_ylim(-2, 2)
     ax.set_xlabel("X")
     ax.set_ylabel("Z")
     ax.set_aspect("equal", adjustable="box")
-    pad = max(1e-6, 0.1 * np.max(np.ptp(centers[:, [0, 2]], axis=0)))
-    ax.set_xlim(centers[:, 0].min() - pad, centers[:, 0].max() + pad)
-    ax.set_ylim(centers[:, 2].min() - pad, centers[:, 2].max() + pad)
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.set_title(title)
 
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     plt.tight_layout()
     plt.savefig(save_path, dpi=300)
-    plt.close()
-    return centers
+    plt.close(fig)
+
+    return centers, look_dirs
 
 
-def save_camera(R, T, output_path, frame_num):
+def save_camera(K, R, T, output_path, frame_num):
 
     # 3d
     os.makedirs(os.path.join(output_path, "3d"), exist_ok=True)
@@ -221,7 +252,9 @@ def save_camera(R, T, output_path, frame_num):
         save_path=os.path.join(output_path, "3d", f"camera_{frame_num}.png"),
         labels=["Left", "Right"],
         convention="opencv",
-        draw_frustum=False,  # 有 K 与 (W,H) 时可置 True
+        draw_frustum=True,
+        K=K,
+        image_size=(1920, 1080),
     )
 
     # 俯视图（X-Z）
@@ -233,3 +266,4 @@ def save_camera(R, T, output_path, frame_num):
         convention="opencv",
     )
     print(centers3d)
+    print(centers2d)
