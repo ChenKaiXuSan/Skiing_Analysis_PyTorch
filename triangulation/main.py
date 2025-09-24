@@ -14,13 +14,11 @@ import cv2
 import glob
 import hydra
 
-from triangulation.camera_position.camera_position import (
-    estimate_camera_pose_from_kpt,
-    estimate_camera_pose_from_ORB,
-    estimate_camera_pose_from_SIFT,
+from triangulation.estimate_camera_position import (
+    process_two_video,
+    process_one_video,
 )
 
-from triangulation.camera_position.SIFT_kpt import estimate_camera_pose_hybrid
 
 from triangulation.load import load_keypoints_from_d2_pt, load_keypoints_from_yolo_pt
 
@@ -39,10 +37,6 @@ from triangulation.vis.pose_visualization import (
 from triangulation.vis.frame_visualization import (
     draw_and_save_keypoints_from_frame,
 )
-from triangulation.vis.SIFT import (
-    visualize_SIFT_matches,
-)
-from triangulation.vis.camera import save_camera
 
 # ---------- 相机参数 ----------
 # K = np.array(
@@ -74,11 +68,46 @@ def triangulate_joints(keypoints1, keypoints2, K, R, T):
     return (pts_4d[:3, :] / pts_4d[3, :]).T
 
 
-# ---------- 主处理函数 ----------
-def process_two_video(left_path, right_path, output_path):
-    output_path = os.path.join(output_path, "two_view")
-    os.makedirs(output_path, exist_ok=True)
+def process_triangulate(
+    left_kpts, right_kpts, left_vframes, right_vframes, K, R, T, output_path
+):
 
+    for l_kpt, r_kpt, l_frame, r_frame, r, t, i in zip(
+        left_kpts, right_kpts, left_vframes, right_vframes, R, T, range(len(left_kpts))
+    ):
+        # * 这里是没有过滤的3d pose
+        joints_3d = triangulate_joints(l_kpt, r_kpt, K, r, t)
+
+        # * 可视化3d关节
+        visualize_3d_joints(
+            joints_3d,
+            r,
+            t,
+            os.path.join(output_path, "3d", f"frame_{i:04d}.png"),
+            title=f"Frame {i} - 3D Joints",
+            y_up=True,
+        )
+
+        res = reproject_and_visualize(
+            img1=l_frame,
+            img2=r_frame,
+            X3=joints_3d,
+            kptL=l_kpt,  # (J,2)
+            kptR=r_kpt,  # (J,2)
+            K1=K,
+            dist1=K_dist,
+            K2=K,
+            dist2=K_dist,
+            R=r,
+            T=t,  # 注意：T要用“有尺度”的（基线已缩放）
+            joint_names=None,  # 或者传 COCO 的关节名列表
+            out_path=os.path.join(output_path, "reproj", f"{i:04d}.jpg"),
+        )
+        print(res["mean_err_L"], res["mean_err_R"])
+        print("Saved to:", res["out_path"])
+
+
+def process(left_path, right_path, out_dir):
     # YOLO 关键点加载
     # left_kpts, left_kpts_score, left_vframes = load_keypoints_from_yolo_pt(left_path)
     # right_kpts, right_kpts_score, right_vframes = load_keypoints_from_yolo_pt(
@@ -88,12 +117,7 @@ def process_two_video(left_path, right_path, output_path):
     left_kpts, left_kpts_score, left_vframes = load_keypoints_from_d2_pt(left_path)
     right_kpts, right_kpts_score, right_vframes = load_keypoints_from_d2_pt(right_path)
 
-    # relative pose from left anr right kpts
-    if left_kpts.shape[0] != right_kpts.shape[0]:
-        raise ValueError(
-            f"Frame mismatch: {left_kpts.shape[0]} vs {right_kpts.shape[0]}"
-        )
-
+    # * draw keypoints on frames and save
     for i in range(left_kpts.shape[0]):
         l_kpt, r_kpt = left_kpts[i], right_kpts[i]
 
@@ -105,210 +129,49 @@ def process_two_video(left_path, right_path, output_path):
         l_frame = left_vframes[i] if left_vframes is not None else None
         r_frame = right_vframes[i] if right_vframes is not None else None
 
-        if l_frame is not None and r_frame is not None:
-            draw_and_save_keypoints_from_frame(
-                l_frame,
-                l_kpt,
-                os.path.join(output_path, "left_frame", f"{i:04d}.png"),
-                color=(0, 255, 0),
-            )
-            draw_and_save_keypoints_from_frame(
-                r_frame,
-                r_kpt,
-                os.path.join(output_path, "right_frame", f"{i:04d}.png"),
-                color=(0, 0, 255),
-            )
-
-        # * estimate camera position from imgs
-        # R, T, pts1, pts2, mask_pose = estimate_camera_pose_from_sift_imgs(
-        #     to_gray_cv_image(l_frame),
-        #     to_gray_cv_image(r_frame),
-        #     K,
-        # )
-
-        # * estimate camera position from kpts
-        # R, T, mask_pose = estimate_camera_pose_from_kpt(
-        #     l_kpt,
-        #     r_kpt,
-        #     K,
-        # )
-
-        # * 固定相机位置
-        # Left camera = world
-        def Ry(theta):
-            c, s = np.cos(theta), np.sin(theta)
-            return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=float)
-
-        def pose_from_center_R(C, R):
-            C = np.asarray(C, dtype=float).reshape(3, 1)
-            return R, -R @ C
-
-        # Right camera: at z=20m and yaw 180° (对视)
-        C2_world = np.array([0, 0, 20.0])
-        R2 = Ry(np.deg2rad(180))
-        R2, T2 = pose_from_center_R(C2_world, R2)
-
-        # * 混合 SIFT + kpt 方法估计相机位置
-        # R, T, info = estimate_camera_pose_hybrid(
-        #     l_frame,
-        #     r_frame,
-        #     K,
-        #     kpt1=l_kpt,
-        #     kpt2=r_kpt,
-        #     kpt_score1=left_kpts_score[i],
-        #     kpt_score2=right_kpts_score[i],
-        #     score_thresh=0.4,
-        #     sift_ratio=0.75,
-        #     magsac_thresh=1e-3,
-        #     kpt_boost=3,
-        #     refine=True,
-        # )
-        # print(info["n_sift"], info["n_kpt"], info["n_inlier"])
-
-        # * COLMAP
-        # visualize_SIFT_matches(
-        #     to_gray_cv_image(l_frame),
-        #     to_gray_cv_image(r_frame),
-        #     pts1,
-        #     pts2,
-        #     os.path.join(output_path, "SIFT"),
-        #     i,
-        # )
-
-        # * 这里是没有过滤的3d pose
-        joints_3d = triangulate_joints(l_kpt, r_kpt, K, R2, T2)
-
-        def cam_to_world(R, T, Xc):
-            R = R.T
-            T = -R @ T.reshape(3)
-            return (R @ Xc.T).T + T
-
-        # X_world = cam_to_world(R, T, joints_3d)
-        X_world = joints_3d  # 保持相机坐标系
-
-        # * 可视化3d关节
-        visualize_3d_joints(
-            X_world,
-            R2,
-            T2,
-            os.path.join(output_path, "3d", f"frame_{i:04d}.png"),
-            title=f"Frame {i} - 3D Joints",
-            y_up=True,
+        draw_and_save_keypoints_from_frame(
+            l_frame,
+            l_kpt,
+            os.path.join(out_dir, "keypoint_vis/left_frame", f"{i:04d}.png"),
+            color=(0, 255, 0),
+        )
+        draw_and_save_keypoints_from_frame(
+            r_frame,
+            r_kpt,
+            os.path.join(out_dir, "keypoint_vis/right_frame", f"{i:04d}.png"),
+            color=(0, 0, 255),
         )
 
-        # * 可视化相机的位置
-        save_camera(K, R2, T2, os.path.join(output_path, "camera"), f"camera_{i:04d}.png")
+    # * process single view post-triage
+    process_one_video(
+        K, left_kpts, left_vframes, os.path.join(out_dir, "single_view/left")
+    )
 
-        # 保存交互式3D场景
-        # html_path = os.path.join(output_path, f"scene_{i:04d}.html")
-        # visualize_3d_scene_interactive(joints_3d, R, T, html_path)
+    process_one_video(
+        K, right_kpts, right_vframes, os.path.join(out_dir, "single_view/right")
+    )
 
-        # 已有：X3d  (T,J,3)  ← 你的三角测量输出
-        #       kptL,kptR (T,J,2)
-        #       K_left,K_right, dist_left, dist_right, R, T
+    # * process two view triangulation
+    r_list, t_list = process_two_video(
+        K=K,
+        left_kpts=left_kpts,
+        left_vframes=left_vframes,
+        right_kpts=right_kpts,
+        right_vframes=right_vframes,
+        output_path=os.path.join(out_dir, "two_view"),
+    )
 
-        # * 这里是过滤了的3d pose
-        # FIXME: 这里过滤之后的kpt是有问题的，需要修复
-        # X_clean, rep = post_triage_single(
-        #     joints_3d,
-        #     l_kpt,
-        #     r_kpt,
-        #     K,
-        #     K,
-        #     R,
-        #     T,
-        #     dist1=K_dist,
-        #     dist2=K_dist,
-        #     confL=left_kpts_score[i],
-        #     confR=right_kpts_score[i],
-        #     conf_thr=0.3,
-        #     err_thresh_px=2.0,
-        # )
-        # print(rep)  # 看 rmse、pos_depth_ratio、kept_ratio
-
-        # visualize_3d_joints(
-        #     X_clean,
-        #     R,
-        #     T,
-        #     os.path.join(output_path, f"frame_{i:04d}_filtered.png"),
-        #     title=f"Frame {i} - Filtered 3D",
-        # )
-
-        res = reproject_and_visualize(
-            img1=left_vframes[i],
-            img2=right_vframes[i],
-            X3=joints_3d,
-            kptL=l_kpt,  # (J,2)
-            kptR=r_kpt,  # (J,2)
-            K1=K,
-            dist1=K_dist,
-            K2=K,
-            dist2=K_dist,
-            R=R2,
-            T=T2,  # 注意：T要用“有尺度”的（基线已缩放）
-            joint_names=None,  # 或者传 COCO 的关节名列表
-            out_path=os.path.join(output_path, "reproj", f"{i:04d}.jpg"),
-        )
-        print(res["mean_err_L"], res["mean_err_R"])
-        print("Saved to:", res["out_path"])
-
-
-def process_one_video(video_path: str, out_dir: str):
-    out_dir = os.path.join(out_dir, "single_view")
-    os.makedirs(out_dir, exist_ok=True)
-
-    # YOLO 关键点加载
-    # left_kpts, left_kpts_score, left_vframes = load_keypoints_from_yolo_pt(left_path)
-    # right_kpts, right_kpts_score, right_vframes = load_keypoints_from_yolo_pt(
-    #     right_path
-    # )
-    # D2 关键点加载
-    kpts, kpts_score, vframes = load_keypoints_from_d2_pt(video_path)
-
-    if vframes is None:
-        raise ValueError("Video frames are required for single view processing.")
-    print(f"[INFO] Loaded {len(vframes)} frames from {video_path}")
-
-    # * estimate camera position from frames
-    for i in range(len(vframes) - 1):
-        print(f"\n[INFO] Processing frame pair {i} and {i+1}")
-        R, T, (yaw, pitch, roll) = estimate_camera_pose_from_ORB(
-            vframes[i],
-            vframes[i + 1],
-            K,
-        )
-        print("Rotation:\n", R)
-        print("Translation direction:", T)
-        print(
-            "Euler angles (deg): Yaw=%.2f, Pitch=%.2f, Roll=%.2f" % (yaw, pitch, roll)
-        )
-
-        save_camera(K, R, T, os.path.join(out_dir, "camera/ORB"), f"camera_{i:04d}.png")
-
-        R, T, *_ = estimate_camera_pose_from_SIFT(
-            vframes[i],
-            vframes[i + 1],
-            K,
-        )
-        print("Rotation:\n", R)
-        print("Translation direction:", T)
-        print(
-            "Euler angles (deg): Yaw=%.2f, Pitch=%.2f, Roll=%.2f" % (yaw, pitch, roll)
-        )
-
-        save_camera(K, R, T, os.path.join(out_dir, "camera/SIFT"), f"camera_{i:04d}.png")
-
-    # * estimate camera position from kpts
-    for kpt in range(kpts.shape[0] - 1):
-        R, T, mask_pose = estimate_camera_pose_from_kpt(
-            kpts[kpt],
-            kpts[kpt + 1],
-            K,
-        )
-        save_camera(K, R, T, os.path.join(out_dir, "camera/kpt"), f"camera_kpt_{kpt:04d}.png")
-
-        print("Rotation:\n", R)
-        print("Translation direction:", T)
+    # * process two view post-triage
+    process_triangulate(
+        left_kpts=left_kpts,
+        right_kpts=right_kpts,
+        left_vframes=left_vframes,
+        right_vframes=right_vframes,
+        K=K,
+        R=r_list,
+        T=t_list,
+        output_path=out_dir,
+    )
 
 
 # ---------- 多人批量处理入口 ----------
@@ -329,13 +192,7 @@ def main_pt(config):
         right = os.path.join(person_dir, "osmo_2.pt")
         out_dir = os.path.join(output_root, person_name)
 
-        process_one_video(left, out_dir)
-        print(f"[INFO] Finished {person_name}, results saved to: {out_dir}")
-        process_one_video(right, out_dir)
-        print(f"[INFO] Finished {person_name}, results saved to: {out_dir}")
-
-        process_two_video(left, right, out_dir)
-        print(f"[INFO] Finished {person_name}, results saved to: {out_dir}")
+        process(left, right, out_dir)
 
 
 if __name__ == "__main__":

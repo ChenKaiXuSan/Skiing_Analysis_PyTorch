@@ -130,6 +130,10 @@ def save_camera_positions_3d(
             idx = [0, 1, 2, 3, 0]
             ax.plot(pts_w[idx, 0], pts_w[idx, 1], pts_w[idx, 2], lw=1, c="k")
 
+    ax.set_xlim(-2, 2)
+    ax.set_ylim(-2, 2)
+    ax.set_zlim(-2, 2)
+    
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")

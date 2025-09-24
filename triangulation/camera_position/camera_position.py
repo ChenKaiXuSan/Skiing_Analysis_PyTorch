@@ -24,31 +24,6 @@ import cv2
 import torch
 
 
-# ---------- 姿态估计 ----------
-def estimate_camera_pose_from_kpt(pts1, pts2, K):
-    """从关键点估计相机姿态（R, t）
-    这里的pts1是左边的视角，pts2是右边的视角
-
-    Args:
-        pts1 (np.ndarray): 第一帧关键点 (N, 2)
-        pts2 (np.ndarray): 第二帧关键点 (N, 2)
-        K (np.ndarray): 相机内参矩阵 (3, 3)
-
-    Returns:
-        R (np.ndarray): 旋转矩阵 (3, 3)
-        t (np.ndarray): 平移向量 (3, 1)
-        mask_pose (np.ndarray): 有效匹配掩码
-    """
-
-    E, mask = cv2.findEssentialMat(
-        pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0
-    )
-    if E is None:
-        return None, None, None
-    _, R, t, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
-    return R, t, mask_pose
-
-
 def to_gray_cv_image(tensor_img):
     """
     将 torch 格式的 HWC 图像（0~1 或 0~255）转换为 OpenCV 灰度图像（uint8）
@@ -73,6 +48,31 @@ def to_gray_cv_image(tensor_img):
     # 转灰度（OpenCV 格式）
     img_gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     return img_gray
+
+
+# ---------- 姿态估计 ----------
+def estimate_camera_pose_from_kpt(pts1, pts2, K):
+    """从关键点估计相机姿态（R, t）
+    这里的pts1是左边的视角，pts2是右边的视角
+
+    Args:
+        pts1 (np.ndarray): 第一帧关键点 (N, 2)
+        pts2 (np.ndarray): 第二帧关键点 (N, 2)
+        K (np.ndarray): 相机内参矩阵 (3, 3)
+
+    Returns:
+        R (np.ndarray): 旋转矩阵 (3, 3)
+        t (np.ndarray): 平移向量 (3, 1)
+        mask_pose (np.ndarray): 有效匹配掩码
+    """
+
+    E, mask = cv2.findEssentialMat(
+        pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0
+    )
+    if E is None:
+        return None, None, None
+    _, R, t, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
+    return R, t, mask_pose
 
 
 def estimate_camera_pose_from_SIFT(img1, img2, K, ratio_thresh=0.75):

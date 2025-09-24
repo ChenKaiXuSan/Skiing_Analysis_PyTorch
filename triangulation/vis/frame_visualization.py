@@ -88,60 +88,6 @@ def _valid_xy(pt: Sequence[float]) -> bool:
     return len(pt) >= 2 and np.isfinite(pt[0]) and np.isfinite(pt[1])
 
 
-# ---- 新增：骨长计算 ----
-
-
-def compute_bone_lengths(
-    pts: np.ndarray,
-    skeleton: Iterable[Tuple[int, int]],
-    *,
-    ignore_nan: bool = True,
-) -> np.ndarray:
-    """
-    计算一帧 3D 关键点在给定骨架下的骨长。
-    pts: (K,3)
-    返回: (E,) 对应 skeleton 中每条边的长度；无效边为 np.nan
-    """
-    P = np.asarray(pts, dtype=float)
-    L: List[float] = []
-    for i, j in skeleton:
-        if i >= len(P) or j >= len(P):
-            L.append(np.nan)
-            continue
-        a, b = P[i], P[j]
-        if ignore_nan and (not np.all(np.isfinite(a)) or not np.all(np.isfinite(b))):
-            L.append(np.nan)
-            continue
-        L.append(float(np.linalg.norm(a - b)))
-    return np.asarray(L, dtype=float)
-
-
-def compute_bone_stats(lengths: np.ndarray) -> Dict[str, float]:
-    """
-    对骨长（含 nan）做统计，返回 mean/median/std/min/max/valid_count。
-    """
-    x = np.asarray(lengths, dtype=float)
-    valid = np.isfinite(x)
-    if not np.any(valid):
-        return dict(
-            mean=np.nan,
-            median=np.nan,
-            std=np.nan,
-            min=np.nan,
-            max=np.nan,
-            valid_count=0,
-        )
-    xv = x[valid]
-    return dict(
-        mean=float(np.nanmean(xv)),
-        median=float(np.nanmedian(xv)),
-        std=float(np.nanstd(xv)),
-        min=float(np.nanmin(xv)),
-        max=float(np.nanmax(xv)),
-        valid_count=int(valid.sum()),
-    )
-
-
 # --------------------------- 2D 关键点绘制 ---------------------------
 
 
