@@ -51,7 +51,7 @@ def to_gray_cv_image(tensor_img):
 
 
 # ---------- 姿态估计 ----------
-def estimate_camera_pose_from_kpt(pts1, pts2, K):
+def estimate_camera_pose_from_kpt(pts1, pts2, K, baseline_m):
     """从关键点估计相机姿态（R, t）
     这里的pts1是左边的视角，pts2是右边的视角
 
@@ -72,10 +72,18 @@ def estimate_camera_pose_from_kpt(pts1, pts2, K):
     if E is None:
         return None, None, None
     _, R, t, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
-    return R, t, mask_pose
+    T = (t / np.linalg.norm(t)) * float(baseline_m)
+
+    # check
+    C2 = -R.T @ T
+    assert np.isclose(
+        np.linalg.norm(C2), baseline_m, rtol=1e-6, atol=1e-9
+    ), "baseline check failed"
+
+    return R, T.reshape(3, 1), mask_pose
 
 
-def estimate_camera_pose_from_SIFT(img1, img2, K, ratio_thresh=0.75):
+def estimate_camera_pose_from_SIFT(img1, img2, K, baseline_m, ratio_thresh=0.75):
     """
     使用 SIFT 特征从两幅图像中估计相机相对姿态（R, T）
 
@@ -123,12 +131,20 @@ def estimate_camera_pose_from_SIFT(img1, img2, K, ratio_thresh=0.75):
     if E is None:
         raise ValueError("Essential matrix 计算失败。")
 
-    _, R, T, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
+    _, R, t, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
 
-    return R, T, pts1, pts2, mask_pose
+    T = (t / np.linalg.norm(t)) * float(baseline_m)
+
+    # check
+    C2 = -R.T @ T
+    assert np.isclose(
+        np.linalg.norm(C2), baseline_m, rtol=1e-6, atol=1e-9
+    ), "baseline check failed"
+
+    return R, T.reshape(3, 1), pts1, pts2, mask_pose
 
 
-def estimate_camera_pose_from_ORB(img1, img2, K, max_matches=1000):
+def estimate_camera_pose_from_ORB(img1, img2, K, baseline_m, max_matches=1000):
     """
     估计相邻帧之间的相机相对位姿（R, t方向, 欧拉角）
 
@@ -171,11 +187,19 @@ def estimate_camera_pose_from_ORB(img1, img2, K, max_matches=1000):
     inlier_mask = inliers.ravel() == 1
     pts1, pts2 = pts1[inlier_mask], pts2[inlier_mask]
 
-    _, R, t, _ = cv2.recoverPose(E, pts1, pts2, K)
+    _, R, t, pose_mask = cv2.recoverPose(E, pts1, pts2, K)
 
     # --- Step4: 计算欧拉角 (ZYX顺序: yaw,pitch,roll) ---
-    yaw = np.degrees(np.arctan2(R[1, 0], R[0, 0]))
-    pitch = np.degrees(np.arcsin(-R[2, 0]))
-    roll = np.degrees(np.arctan2(R[2, 1], R[2, 2]))
+    # yaw = np.degrees(np.arctan2(R[1, 0], R[0, 0]))
+    # pitch = np.degrees(np.arcsin(-R[2, 0]))
+    # roll = np.degrees(np.arctan2(R[2, 1], R[2, 2]))
 
-    return R, (t / np.linalg.norm(t)).ravel(), (yaw, pitch, roll)
+    T = (t / np.linalg.norm(t)) * float(baseline_m)
+
+    # check
+    C2 = -R.T @ T
+    assert np.isclose(
+        np.linalg.norm(C2), baseline_m, rtol=1e-6, atol=1e-9
+    ), "baseline check failed"
+
+    return R, T.reshape(3,1), pose_mask

@@ -50,6 +50,7 @@ __all__ = [
 
 # ---- 新增：骨长计算 ----
 
+
 def compute_bone_lengths(
     pts: np.ndarray,
     skeleton: Iterable[Tuple[int, int]],
@@ -105,93 +106,151 @@ def compute_bone_stats(lengths: np.ndarray) -> Dict[str, float]:
 
 
 def draw_camera(
-    ax: plt.Axes, R: np.ndarray, T: np.ndarray, scale: float = 0.1, label: str = "Cam"
-) -> None:
-    """
-    在 3D 轴上画一个相机坐标系（右手，Z 朝前）。
-    R: (3,3) 旋转矩阵；T: (3,) 或 (3,1) 平移。
-    """
-    R = np.asarray(R, dtype=float).reshape(3, 3)
-    T = np.asarray(T, dtype=float).reshape(3)
-    origin = T
-
-    axes = np.eye(3)
-    colors = ("r", "g", "b")
-    for axis, color in zip(axes, colors):
-        end = (R @ axis) * scale + origin
-        ax.plot([origin[0], end[0]], [origin[1], end[1]], [origin[2], end[2]], c=color)
-
-    # 视线方向（-Z）
-    view_dir = (R @ np.array([0, 0, -1.0])) * scale * 1.5 + origin
-    ax.plot(
-        [origin[0], view_dir[0]],
-        [origin[1], view_dir[1]],
-        [origin[2], view_dir[2]],
-        c="k",
-        linestyle="--",
-    )
-    ax.text(*origin, label, color="black")
-
-
-# ---- 可选：更通用的等比例工具，支持指定范围/半径/中心/刻度 ----
-def set_axes_equal(
     ax: plt.Axes,
-    *,
-    limits: Optional[
-        Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]
-    ] = None,
-    center: Optional[Tuple[float, float, float]] = None,
-    radius: Optional[float] = None,
-    tick_step: Optional[float] = None,
-) -> None:
+    R: np.ndarray,  # (3,3)
+    T: np.ndarray,  # (3,) or (3,1)
+    K: np.ndarray,  # (3,3)
+    image_size: Tuple[int, int],  # (W, H) in px
+    axis_len: float = 5,
+    frustum_depth: float = 1,
+    colors: Tuple[str, str, str] = ("r", "g", "b"),
+    label: Optional[str] = None,
+    ray_scale_mode: Literal[
+        "depth", "focal"
+    ] = "depth",  # "depth": 固定 z_cam；"focal": 以焦距近似尺度
+    linewidths: Dict[str, float] = None,  # {"axis": 2.0, "frustum": 1.0}
+    frustum_alpha: float = 1.0,
+) -> np.ndarray:
     """
-    等比例三维坐标：
-      - 若提供 limits=(xlim,ylim,zlim) 则直接采用；
-      - 否则以 center+radius 设置立方体范围；
-      - 若都未提供，回退到基于当前数据自适应的等比例。
-      - tick_step: 指定三个轴统一的刻度间隔（可选）。
+    在 Matplotlib 3D 轴上绘制 OpenCV 相机 (坐标轴 & 视锥)，并对齐到 Matplotlib 3D 坐标系：
+      OpenCV:     x→右, y→下, z→前
+      Matplotlib: x→右, y→前, z→上
+
+    参数
+    ----
+    R, T : 相机外参
+      - 如果 convention="world2cam"（默认），满足 Xc = R @ Xw + T
+      - 如果 convention="cam2world"，满足 Xw = R @ Xc + T
+    K : 内参矩阵 (3x3)
+    image_size : (W, H) 像素
+    axis_len : 相机坐标轴长度（世界单位）
+    frustum_depth : 视锥体深度（世界单位），当 ray_scale_mode="depth" 时生效
+    colors : 坐标轴颜色 (X, Y, Z)
+    label : 相机中心标注
+    convention : 外参定义方式
+    ray_scale_mode :
+        - "depth": 将像素反投影射线缩放到 z_cam=frustum_depth
+        - "focal": 以焦距近似尺度（更像真实FOV），深度感基于 fx/fy
+    linewidths : 线宽配置，默认为 {"axis": 2.0, "frustum": 1.0}
+    frustum_alpha : 视锥边透明度
+
+    返回
+    ----
+    C_plt : (3,) 相机中心（已映射到 Matplotlib 世界系）
     """
-    if limits is not None:
-        (x0, x1), (y0, y1), (z0, z1) = limits
+    # ------- 参数与形状 -------
+    if linewidths is None:
+        linewidths = {"axis": 2.0, "frustum": 1.0}
+
+    R = np.asarray(R, dtype=float).reshape(3, 3)
+    T = np.asarray(T, dtype=float).reshape(3, 1)
+    K = np.asarray(K, dtype=float).reshape(3, 3)
+    W, H = [float(x) for x in image_size]
+
+    # ------- OpenCV(world) -> Matplotlib(world) 线性映射 -------
+    # x 保持；z(前) -> y(前)；-y(上) -> z(上)
+    M = np.array(
+        [
+            [1.0, 0.0, 0.0],  # x -> x
+            [0.0, 0.0, 1.0],  # z -> y
+            [0.0, -1.0, 0.0],  # -y -> z
+        ],
+        dtype=float,
+    )
+
+    # ------- 相机中心 (OpenCV 世界系) -------
+    # Xc = R Xw + T  => 0 = R C + T  => C = -R^T T
+    C_cv = -R.T @ T
+    R_wc = R.T  # world <- cam
+    t_wc = C_cv.reshape(3)  # same as camera center
+
+    # ------- 相机中心映射到 Matplotlib 世界系 -------
+    C_plt = (M @ C_cv).reshape(3)
+
+    # ------- 画相机坐标轴（使用 R_wc 的行向量作为相机轴在世界系中的表示）-------
+    # rows of R_wc: x_cam,y_cam,z_cam expressed in world(OpenCV) coords
+    axes_cv = R_wc.copy()
+    lw_axis = float(linewidths.get("axis", 2.0))
+    for axis_cv, color in zip(axes_cv, colors):
+        end_vec_cv = axis_cv * axis_len  # (3,)
+        end_vec_plt = M @ end_vec_cv
+        ax.plot(
+            [C_plt[0], C_plt[0] + end_vec_plt[0]],
+            [C_plt[1], C_plt[1] + end_vec_plt[1]],
+            [C_plt[2], C_plt[2] + end_vec_plt[2]],
+            c=color,
+            lw=lw_axis,
+        )
+
+    # ------- 构造视锥：像素四角反投影 -> 相机系 -> 世界系(OpenCV) -> Matplotlib -------
+    # 像素四角齐次坐标
+    corners_px = np.array(
+        [
+            [0.0, 0.0, 1.0],
+            [W - 1, 0.0, 1.0],
+            [W - 1, H - 1, 1.0],
+            [0.0, H - 1, 1.0],
+        ],
+        dtype=float,
+    )
+
+    Kinv = np.linalg.inv(K)
+    # 射线方向（相机系）
+    rays_cam = (Kinv @ corners_px.T).T  # (4,3)
+
+    if ray_scale_mode == "depth":
+        # 令 z_cam = frustum_depth
+        scale = frustum_depth / np.clip(rays_cam[:, 2:3], 1e-12, None)
+        rays_cam = rays_cam * scale
     else:
-        if radius is None or center is None:
-            # 回退：基于当前 axis 数据范围
-            x_limits = ax.get_xlim3d()
-            y_limits = ax.get_ylim3d()
-            z_limits = ax.get_zlim3d()
-            x_range = abs(x_limits[1] - x_limits[0])
-            y_range = abs(y_limits[1] - y_limits[0])
-            z_range = abs(z_limits[1] - z_limits[0])
-            x_mid = np.mean(x_limits)
-            y_mid = np.mean(y_limits)
-            z_mid = np.mean(z_limits)
-            rad = 0.5 * float(max(x_range, y_range, z_range))
-            x0, x1 = x_mid - rad, x_mid + rad
-            y0, y1 = y_mid - rad, y_mid + rad
-            z0, z1 = z_mid - rad, z_mid + rad
-        else:
-            cx, cy, cz = center
-            rad = float(radius)
-            x0, x1 = cx - rad, cx + rad
-            y0, y1 = cy - rad, cy + rad
-            z0, z1 = cz - rad, cz + rad
+        # 按焦距尺度：以 fx/fy 的均值近似一个“单位深度”量级
+        fx, fy = K[0, 0], K[1, 1]
+        s = float((fx + fy) * 0.5)
+        if s <= 1e-12:
+            s = 1.0
+        rays_cam = rays_cam / s * max(axis_len, frustum_depth)
 
-    ax.set_xlim3d([x0, x1])
-    ax.set_ylim3d([y0, y1])
-    ax.set_zlim3d([z0, z1])
+    # cam -> world(OpenCV)
+    corners_w_cv = (R_wc @ rays_cam.T).T + t_wc.reshape(1, 3)  # (4,3)
+    # world(OpenCV) -> world(Matplotlib)
+    corners_w_plt = (M @ corners_w_cv.T).T
 
-    # 统一刻度
-    if tick_step is not None and tick_step > 0:
+    # ------- 画视锥边 -------
+    lw_frustum = float(linewidths.get("frustum", 1.0))
+    for p in corners_w_plt:
+        ax.plot(
+            [C_plt[0], p[0]],
+            [C_plt[1], p[1]],
+            [C_plt[2], p[2]],
+            c="k",
+            lw=lw_frustum,
+            alpha=frustum_alpha,
+        )
+    loop = [0, 1, 2, 3, 0]
+    ax.plot(
+        corners_w_plt[loop, 0],
+        corners_w_plt[loop, 1],
+        corners_w_plt[loop, 2],
+        c="k",
+        lw=lw_frustum,
+        alpha=frustum_alpha,
+    )
 
-        def _ticks(a, b):
-            # 包含端点的等间隔
-            start = np.floor(a / tick_step) * tick_step
-            end = np.ceil(b / tick_step) * tick_step
-            return np.arange(start, end + 1e-6, tick_step)
+    # ------- 标签 -------
+    if label:
+        ax.text(C_plt[0], C_plt[1], C_plt[2], label, fontsize=9, color="black")
 
-        ax.set_xticks(_ticks(x0, x1))
-        ax.set_yticks(_ticks(y0, y1))
-        ax.set_zticks(_ticks(z0, z1))
+    return C_plt
 
 
 def _ensure_joints3d_arr(joints_3d: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
@@ -207,20 +266,13 @@ def visualize_3d_joints(
     joints_3d: Union[np.ndarray, torch.Tensor],
     R: np.ndarray,
     T: np.ndarray,
+    K: np.ndarray,
+    image_size: Tuple[int, int],
     save_path: Union[str, Path],
-    *,
     title: str = "Triangulated 3D Joints",
-    skeleton: Optional[Iterable[Tuple[int, int]]] = COCO_SKELETON,
     dpi: int = 300,
     y_up: bool = False,
-    axis_limits: Optional[
-        Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]
-    ] = None,
-    tick_step: Optional[float] = None,
-    margin: float = 0.15,  # 自动范围时的边界余量
     show_stats: bool = True,  # 是否叠加骨长统计文本
-    show_lengths: bool = False,  # 是否在每条骨的中点标注长度
-    length_fmt: str = "{:.2f}",
 ) -> Optional[Dict[str, float]]:
     """
     保存 3D 关键点+相机示意图，并可：
@@ -237,43 +289,30 @@ def visualize_3d_joints(
     T = np.asarray(T, dtype=float).reshape(3)
 
     # 可视化坐标置换（Y 朝上）
-    if y_up:
-        P = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]], dtype=float)
-        pts_plot = (P @ pts.T).T
-        R_plot = P @ R
-        T_plot = P @ T
-        xlab, ylab, zlab = "X", "Z", "Y (up)"
-    else:
-        pts_plot = pts
-        R_plot, T_plot = R, T
-        xlab, ylab, zlab = "X", "Y", "Z"
+    pts_plot = pts
+    xlab, ylab, zlab = "X", "Z", "Y (up)"
 
     fig = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(111, projection="3d")
-
-    # 相机
-    draw_camera(ax, np.eye(3), np.zeros(3), label="Cam1")
-    draw_camera(ax, R_plot, T_plot, label="Cam2")
 
     # 点与索引
     ax.scatter(pts_plot[:, 0], pts_plot[:, 1], pts_plot[:, 2], c="blue", s=30)
     for i, (x, y, z) in enumerate(pts_plot):
         ax.text(x, y, z, str(i), size=8)
 
+    
+    # 相机
+    draw_camera(
+        ax=ax, R=np.eye(3), T=np.zeros(3), K=K, image_size=image_size, label="Cam1"
+    )
+    draw_camera(ax=ax, R=R, T=T, K=K, image_size=image_size, label="Cam2")
+
     # 骨架与长度
+    skeleton = COCO_SKELETON
     if skeleton is not None:
         lengths = compute_bone_lengths(
             pts, skeleton
         )  # 用原坐标算长度（与可视化变换无关）
-        if show_lengths:
-            for (i, j), L in zip(skeleton, lengths):
-                if not np.isfinite(L) or i >= len(pts_plot) or j >= len(pts_plot):
-                    continue
-                p, q = pts_plot[i], pts_plot[j]
-                mid = (p + q) / 2.0
-                ax.text(
-                    mid[0], mid[1], mid[2], length_fmt.format(L), color="purple", size=7
-                )
 
         # 画线（在绘图坐标系）
         for i, j in skeleton:
@@ -299,18 +338,6 @@ def visualize_3d_joints(
     ax.set_ylabel(ylab)
     ax.set_zlabel(zlab)
 
-    # ---- 统一等比例 + 刻度 ----
-    if axis_limits is None:
-        # 基于数据自适应：考虑关键点与两台相机位置
-        all_xyz = np.vstack([pts_plot, np.zeros((1, 3)), T_plot.reshape(1, 3)])
-        mins = np.nanmin(all_xyz, axis=0)
-        maxs = np.nanmax(all_xyz, axis=0)
-        center = (mins + maxs) / 2.0
-        rad = 0.5 * float(np.nanmax(maxs - mins)) * (1.0 + float(margin))
-        set_axes_equal(ax, center=tuple(center), radius=rad, tick_step=tick_step)
-    else:
-        set_axes_equal(ax, limits=axis_limits, tick_step=tick_step)
-
     # 叠加统计文本
     if show_stats and stats is not None:
         txt = (
@@ -332,6 +359,12 @@ def visualize_3d_joints(
         )
 
     plt.tight_layout()
+
+    # ax.set_zlim(ax.get_zlim()[::-1])
+    ax.set_xlim(-5, 5)
+    ax.set_ylim(-5, 25)
+    ax.set_zlim(-10, 30)
+
     fig.savefig(str(save_path), dpi=dpi)
     plt.close(fig)
     print(f"[INFO] Saved: {save_path}")

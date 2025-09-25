@@ -6,7 +6,7 @@ hydra:
     chdir: false
 
 pt_path: /workspace/data/pt
-log_path: logs/triangulated
+log_path: logs/triangulated/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 camera:
   matrix:
@@ -19,4 +19,6 @@ camera:
 
 paths:
   input: /workspace/data/pt
-  output: ${log_path}/3d_joints
+  output: ${log_path}
+
+baseline_m: 20

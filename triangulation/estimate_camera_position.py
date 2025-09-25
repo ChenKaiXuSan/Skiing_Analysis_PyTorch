@@ -21,6 +21,8 @@ Date      	By	Comments
 """
 import os
 import numpy as np
+from triangulation.vis.camera import save_camera
+from pathlib import Path
 
 from triangulation.camera_position.camera_position import (
     estimate_camera_pose_from_kpt,
@@ -29,12 +31,36 @@ from triangulation.camera_position.camera_position import (
 )
 
 
-from triangulation.vis.camera import save_camera
+def save_RT_matrices(R_list, T_list, save_path: str):
+    """
+    保存一系列相机外参 (R, T) 到文件。
+
+    参数:
+        R_list: list of (3,3) ndarray
+        T_list: list of (3,) or (3,1) ndarray
+        save_path: str, 输出路径 (.npz 或 .npy)
+    """
+    R_array = np.stack(R_list, axis=0)
+    T_array = np.stack([np.ravel(T) for T in T_list], axis=0)
+
+    save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 自动选择格式
+    if save_path.suffix == ".npz":
+        np.savez_compressed(save_path, R=R_array, T=T_array)
+    elif save_path.suffix == ".npy":
+        np.save(save_path, {"R": R_array, "T": T_array})
+    else:
+        # 默认保存 npz
+        np.savez_compressed(str(save_path) + ".npz", R=R_array, T=T_array)
+
+    print(f"[INFO] Saved R,T to {save_path}")
 
 
 # ---------- 主处理函数 ----------
 def process_two_video(
-    K, left_kpts, left_vframes, right_kpts, right_vframes, output_path
+    K, left_kpts, left_vframes, right_kpts, right_vframes, output_path, baseline_m
 ):
 
     r_list, t_list = [], []
@@ -63,6 +89,7 @@ def process_two_video(
             l_frame,
             r_frame,
             K,
+            baseline_m,
         )
 
         save_camera(
@@ -70,21 +97,13 @@ def process_two_video(
         )
 
         # * estimate camera position from kpts
-        R, T, mask_pose = estimate_camera_pose_from_kpt(
-            l_kpt,
-            r_kpt,
-            K,
-        )
+        R, T, mask_pose = estimate_camera_pose_from_kpt(l_kpt, r_kpt, K, baseline_m=20)
 
         save_camera(
             K, R, T, os.path.join(output_path, "camera/kpt"), f"camera_{i:04d}.png"
         )
 
-        R, T, *_ = estimate_camera_pose_from_ORB(
-            l_frame,
-            r_frame,
-            K,
-        )
+        R, T, *_ = estimate_camera_pose_from_ORB(l_frame, r_frame, K, baseline_m)
         save_camera(
             K, R, T, os.path.join(output_path, "camera/ORB"), f"camera_{i:04d}.png"
         )
@@ -95,14 +114,10 @@ def process_two_video(
             c, s = np.cos(theta), np.sin(theta)
             return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=float)
 
-        def pose_from_center_R(C, R):
-            C = np.asarray(C, dtype=float).reshape(3, 1)
-            return R, -R @ C
-
         # Right camera: at z=20m and yaw 180° (对视)
-        C2_world = np.array([0, 0, 20.0])
+        C2 = np.array([0, 0, 20.0])
         R2 = Ry(np.deg2rad(180))
-        R2, T2 = pose_from_center_R(C2_world, R2)
+        T2 = -R2 @ C2
 
         save_camera(
             K, R2, T2, os.path.join(output_path, "camera/fixed"), f"camera_{i:04d}.png"
@@ -118,43 +133,36 @@ def process_two_video(
         #     i,
         # )
 
-        r_list.append(R)
-        t_list.append(T)
+        r_list.append(R2)
+        t_list.append(T2)
+
+    save_RT_matrices(r_list, t_list, os.path.join(output_path, "RT_matrices.npz"))
 
     return r_list, t_list
 
 
-def process_one_video(K, kpts, vframes, out_dir: str):
+def process_one_video(K, kpts, vframes, baseline_m, out_dir: str):
     r_list, t_list = [], []
     os.makedirs(out_dir, exist_ok=True)
 
     # * estimate camera position from frames
     for i in range(len(vframes) - 1):
         print(f"\n[INFO] Processing frame pair {i} and {i+1}")
-        R, T, (yaw, pitch, roll) = estimate_camera_pose_from_ORB(
-            vframes[i],
-            vframes[i + 1],
-            K,
+
+        R, T, _ = estimate_camera_pose_from_ORB(
+            vframes[i], vframes[i + 1], K, baseline_m=baseline_m
         )
         print("Rotation:\n", R)
         print("Translation direction:", T)
-        print(
-            "Euler angles (deg): Yaw=%.2f, Pitch=%.2f, Roll=%.2f" % (yaw, pitch, roll)
-        )
 
         save_camera(K, R, T, os.path.join(out_dir, "camera/ORB"), f"camera_{i:04d}.png")
 
         # * estimate camera position from SIFT
         R, T, *_ = estimate_camera_pose_from_SIFT(
-            vframes[i],
-            vframes[i + 1],
-            K,
+            vframes[i], vframes[i + 1], K, baseline_m=baseline_m
         )
         print("Rotation:\n", R)
         print("Translation direction:", T)
-        print(
-            "Euler angles (deg): Yaw=%.2f, Pitch=%.2f, Roll=%.2f" % (yaw, pitch, roll)
-        )
 
         save_camera(
             K, R, T, os.path.join(out_dir, "camera/SIFT"), f"camera_{i:04d}.png"
@@ -163,9 +171,7 @@ def process_one_video(K, kpts, vframes, out_dir: str):
     # * estimate camera position from kpts
     for kpt in range(kpts.shape[0] - 1):
         R, T, mask_pose = estimate_camera_pose_from_kpt(
-            kpts[kpt],
-            kpts[kpt + 1],
-            K,
+            kpts[kpt], kpts[kpt + 1], K, baseline_m=baseline_m
         )
         save_camera(
             K, R, T, os.path.join(out_dir, "camera/kpt"), f"camera_kpt_{kpt:04d}.png"
@@ -176,4 +182,8 @@ def process_one_video(K, kpts, vframes, out_dir: str):
 
     r_list.append(R)
     t_list.append(T)
+
+    # save RT
+    save_RT_matrices(r_list, t_list, os.path.join(out_dir, "RT_matrices.npz"))
+
     return r_list, t_list

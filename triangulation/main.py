@@ -75,15 +75,19 @@ def process_triangulate(
     for l_kpt, r_kpt, l_frame, r_frame, r, t, i in zip(
         left_kpts, right_kpts, left_vframes, right_vframes, R, T, range(len(left_kpts))
     ):
+        W, H = l_frame.shape[1], l_frame.shape[0]
+
         # * 这里是没有过滤的3d pose
         joints_3d = triangulate_joints(l_kpt, r_kpt, K, r, t)
 
         # * 可视化3d关节
         visualize_3d_joints(
-            joints_3d,
-            r,
-            t,
-            os.path.join(output_path, "3d", f"frame_{i:04d}.png"),
+            joints_3d=joints_3d,
+            R=r,
+            T=t,
+            K=K,
+            image_size=(W, H),
+            save_path=os.path.join(output_path, "3d", f"frame_{i:04d}.png"),
             title=f"Frame {i} - 3D Joints",
             y_up=True,
         )
@@ -107,7 +111,7 @@ def process_triangulate(
         print("Saved to:", res["out_path"])
 
 
-def process(left_path, right_path, out_dir):
+def process(left_path, right_path, out_dir, baseline_m):
     # YOLO 关键点加载
     # left_kpts, left_kpts_score, left_vframes = load_keypoints_from_yolo_pt(left_path)
     # right_kpts, right_kpts_score, right_vframes = load_keypoints_from_yolo_pt(
@@ -116,6 +120,13 @@ def process(left_path, right_path, out_dir):
     # D2 关键点加载
     left_kpts, left_kpts_score, left_vframes = load_keypoints_from_d2_pt(left_path)
     right_kpts, right_kpts_score, right_vframes = load_keypoints_from_d2_pt(right_path)
+
+    # ! 为了测试截断
+    # num = 10
+    # left_kpts = left_kpts[:num]
+    # left_vframes = left_vframes[:num]
+    # right_kpts = right_kpts[:num]
+    # right_vframes = right_vframes[:num]
 
     # * draw keypoints on frames and save
     for i in range(left_kpts.shape[0]):
@@ -143,13 +154,15 @@ def process(left_path, right_path, out_dir):
         )
 
     # * process single view post-triage
-    process_one_video(
-        K, left_kpts, left_vframes, os.path.join(out_dir, "single_view/left")
-    )
+    # process_one_video(
+    #     K, left_kpts, left_vframes, os.path.join(out_dir, "single_view/left"), baseline_m=baseline_m,
+    # )
 
-    process_one_video(
-        K, right_kpts, right_vframes, os.path.join(out_dir, "single_view/right")
-    )
+    # process_one_video(
+    #     K, right_kpts, right_vframes, os.path.join(out_dir, "single_view/right"), baseline_m=baseline_m,
+    # )
+
+    # TODO: 如果单个视点可行的话，需要从单个视点来计算两个相机的R，T
 
     # * process two view triangulation
     r_list, t_list = process_two_video(
@@ -159,6 +172,7 @@ def process(left_path, right_path, out_dir):
         right_kpts=right_kpts,
         right_vframes=right_vframes,
         output_path=os.path.join(out_dir, "two_view"),
+        baseline_m=baseline_m,
     )
 
     # * process two view post-triage
@@ -180,6 +194,7 @@ def main_pt(config):
 
     input_root = config.paths.input
     output_root = config.paths.output
+    baseline_m = config.baseline_m
 
     subjects = sorted(glob.glob(f"{input_root}/*/"))
     if not subjects:
@@ -192,7 +207,7 @@ def main_pt(config):
         right = os.path.join(person_dir, "osmo_2.pt")
         out_dir = os.path.join(output_root, person_name)
 
-        process(left, right, out_dir)
+        process(left, right, out_dir, baseline_m=baseline_m)
 
 
 if __name__ == "__main__":

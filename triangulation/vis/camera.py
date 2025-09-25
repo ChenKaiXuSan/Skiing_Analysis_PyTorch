@@ -42,15 +42,6 @@ def _camera_center(R, T, convention="opencv"):
         raise ValueError("convention must be 'opencv' or 'cam2world'")
 
 
-def _set_axes_equal(ax):
-    xs, ys, zs = ax.get_xlim3d(), ax.get_ylim3d(), ax.get_zlim3d()
-    xr, yr, zr = xs[1] - xs[0], ys[1] - ys[0], zs[1] - zs[0]
-    m = max(xr, yr, zr)
-    ax.set_xlim3d(np.mean(xs) - m / 2, np.mean(xs) + m / 2)
-    ax.set_ylim3d(np.mean(ys) - m / 2, np.mean(ys) + m / 2)
-    ax.set_zlim3d(np.mean(zs) - m / 2, np.mean(zs) + m / 2)
-
-
 def save_camera_positions_3d(
     R_list,
     T_list,
@@ -60,8 +51,8 @@ def save_camera_positions_3d(
     draw_frustum=True,
     K=None,
     image_size=None,
-    frustum_depth=0.5,
-    axis_len=0.2,
+    frustum_depth=1,
+    axis_len=2,
     elev=20,
     azim=-60,
     title="Camera Layout (3D)",
@@ -130,15 +121,15 @@ def save_camera_positions_3d(
             idx = [0, 1, 2, 3, 0]
             ax.plot(pts_w[idx, 0], pts_w[idx, 1], pts_w[idx, 2], lw=1, c="k")
 
-    ax.set_xlim(-2, 2)
-    ax.set_ylim(-2, 2)
-    ax.set_zlim(-2, 2)
-    
+    ax.set_xlim(-5, 5)
+    ax.set_ylim(-5, 5)
+    ax.set_zlim(-10, 30)
+
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
     ax.view_init(elev=elev, azim=azim)
-    _set_axes_equal(ax)
+    # _set_axes_equal(ax)
     ax.set_title(title)
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     fig.tight_layout()
@@ -153,7 +144,7 @@ def save_camera_positions_topdown(
     save_path,
     labels=None,
     convention="opencv",
-    arrow_len=0.2,
+    arrow_len=5,
     title="Camera Layout (Top-Down XZ)",
 ):
     """
@@ -219,8 +210,8 @@ def save_camera_positions_topdown(
     centers = np.vstack(centers)
     look_dirs = np.vstack(look_dirs)
 
-    ax.set_xlim(-2, 2)
-    ax.set_ylim(-2, 2)
+    ax.set_xlim(-10, 10)
+    ax.set_ylim(-10, 30)
     ax.set_xlabel("X")
     ax.set_ylabel("Z")
     ax.set_aspect("equal", adjustable="box")
