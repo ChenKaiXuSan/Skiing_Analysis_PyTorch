@@ -14,11 +14,12 @@ import cv2
 import glob
 import hydra
 
-from triangulation.estimate_camera_position import (
-    process_two_video,
-    process_one_video,
-)
+# from triangulation.estimate_camera_position import (
+#     process_two_video,
+#     process_one_video,
+# )
 
+from triangulation.two_view import process_two_video
 
 from triangulation.load import load_keypoints_from_d2_pt, load_keypoints_from_yolo_pt
 
@@ -87,7 +88,7 @@ def process_triangulate(
             T=t,
             K=K,
             image_size=(W, H),
-            save_path=os.path.join(output_path, "3d", f"frame_{i:04d}.png"),
+            save_path=os.path.join(output_path, f"frame_{i:04d}.png"),
             title=f"Frame {i} - 3D Joints",
             y_up=True,
         )
@@ -165,7 +166,7 @@ def process(left_path, right_path, out_dir, baseline_m):
     # TODO: 如果单个视点可行的话，需要从单个视点来计算两个相机的R，T
 
     # * process two view triangulation
-    r_list, t_list = process_two_video(
+    data = process_two_video(
         K=K,
         left_kpts=left_kpts,
         left_vframes=left_vframes,
@@ -176,16 +177,22 @@ def process(left_path, right_path, out_dir, baseline_m):
     )
 
     # * process two view post-triage
-    process_triangulate(
-        left_kpts=left_kpts,
-        right_kpts=right_kpts,
-        left_vframes=left_vframes,
-        right_vframes=right_vframes,
-        K=K,
-        R=r_list,
-        T=t_list,
-        output_path=out_dir,
-    )
+    for method, v in data.items():
+        _out_dir = os.path.join(out_dir, "3d", method)
+        r_list = v['R']
+        t_list = v['t']
+        frame_num = v['frame']
+
+        process_triangulate(
+            left_kpts=left_kpts,
+            right_kpts=right_kpts,
+            left_vframes=left_vframes,
+            right_vframes=right_vframes,
+            K=K,
+            R=r_list,
+            T=t_list,
+            output_path=_out_dir,
+        )
 
 
 # ---------- 多人批量处理入口 ----------

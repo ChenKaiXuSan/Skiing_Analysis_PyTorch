@@ -123,16 +123,6 @@ def process_two_video(
             K, R2, T2, os.path.join(output_path, "camera/fixed"), f"camera_{i:04d}.png"
         )
 
-        # * COLMAP
-        # visualize_SIFT_matches(
-        #     to_gray_cv_image(l_frame),
-        #     to_gray_cv_image(r_frame),
-        #     pts1,
-        #     pts2,
-        #     os.path.join(output_path, "SIFT"),
-        #     i,
-        # )
-
         r_list.append(R2)
         t_list.append(T2)
 
