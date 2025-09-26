@@ -123,7 +123,7 @@ def process(left_path, right_path, out_dir, baseline_m):
     right_kpts, right_kpts_score, right_vframes = load_keypoints_from_d2_pt(right_path)
 
     # ! 为了测试截断
-    # num = 10
+    # num = 30
     # left_kpts = left_kpts[:num]
     # left_vframes = left_vframes[:num]
     # right_kpts = right_kpts[:num]
@@ -179,9 +179,9 @@ def process(left_path, right_path, out_dir, baseline_m):
     # * process two view post-triage
     for method, v in data.items():
         _out_dir = os.path.join(out_dir, "3d", method)
-        r_list = v['R']
-        t_list = v['t']
-        frame_num = v['frame']
+        r_list = v["R"]
+        t_list = v["t"]
+        frame_num = v["frame"]
 
         process_triangulate(
             left_kpts=left_kpts,
