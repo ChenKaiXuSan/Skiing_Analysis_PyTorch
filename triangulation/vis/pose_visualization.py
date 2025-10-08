@@ -6,7 +6,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple, Union
 
-import cv2
 import matplotlib
 import numpy as np
 import torch
@@ -288,24 +287,33 @@ def visualize_3d_joints(
     R = np.asarray(R, dtype=float).reshape(3, 3)
     T = np.asarray(T, dtype=float).reshape(3)
 
-    # 可视化坐标置换（Y 朝上）
-    pts_plot = pts
-    xlab, ylab, zlab = "X", "Z", "Y (up)"
-
+    # 初始化图形
     fig = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(111, projection="3d")
 
-    # 点与索引
-    ax.scatter(pts_plot[:, 0], pts_plot[:, 1], pts_plot[:, 2], c="blue", s=30)
-    for i, (x, y, z) in enumerate(pts_plot):
-        ax.text(x, y, z, str(i), size=8)
-
-    
     # 相机
     draw_camera(
         ax=ax, R=np.eye(3), T=np.zeros(3), K=K, image_size=image_size, label="Cam1"
     )
     draw_camera(ax=ax, R=R, T=T, K=K, image_size=image_size, label="Cam2")
+
+    # 可视化坐标置换（Y 朝上）
+    # 把pts从cv2世界系映射到matplotlib世界系
+    M = np.array(
+        [
+            [1.0, 0.0, 0.0],  # x -> x
+            [0.0, 0.0, 1.0],  # z -> y
+            [0.0, -1.0, 0.0],  # -y -> z
+        ],
+        dtype=float,
+    )
+    pts_plot = (M @ pts.T).T
+    xlab, ylab, zlab = "X", "Z", "Y (up)"
+
+    # 点与索引
+    ax.scatter(pts_plot[:, 0], pts_plot[:, 1], pts_plot[:, 2], c="blue", s=30)
+    for i, (x, y, z) in enumerate(pts_plot):
+        ax.text(x, y, z, str(i), size=8)
 
     # 骨架与长度
     skeleton = COCO_SKELETON

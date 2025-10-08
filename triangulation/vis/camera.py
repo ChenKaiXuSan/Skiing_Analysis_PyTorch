@@ -72,11 +72,49 @@ def save_camera_positions_3d(
 
     centers = []
     for i, (R, T, name) in enumerate(zip(R_list, T_list, labels)):
+
         R = np.asarray(R).reshape(3, 3)
+        T = np.asarray(T).reshape(3, 1)
+        K = np.asarray(K).reshape(3, 3) 
+
+        # C = _camera_center(R, T, convention)
+        # centers.append(C)
+
+        # 坐标轴（相机系在世界中的朝向）
+        # convert cv2 to matplotlib
+
+        # M = np.array(
+        #     [
+        #         [1, 0, 0],
+        #         [0, -1, 0],
+        #         [0, 0, -1],
+        #     ]
+        # )
+        # C_cv = -R.T @ T
+        # R_wc = R.T
+        # t_wc = C_cv.reshape(3)
+        
+        # C_plt = (M @ C_cv).reshape(3)
+        # centers.append(C_plt)
+
+        # # ------- 画相机坐标轴（使用 R_wc 的行向量作为相机轴在世界系中的表示）-------
+        # # rows of R_wc: x_cam,y_cam,z_cam expressed in world(OpenCV) coords
+        # axes_cv = R_wc.copy()
+        # lw_axis = float(axis_len)
+        # for axis_cv, color in zip(axes_cv, ("r", "g", "b")):
+        #     end_vec_cv = axis_cv * axis_len  # (3,)
+        #     end_vec_plt = M @ end_vec_cv
+        #     ax.plot(
+        #         [C_plt[0], C_plt[0] + end_vec_plt[0]],
+        #         [C_plt[1], C_plt[1] + end_vec_plt[1]],
+        #         [C_plt[2], C_plt[2] + end_vec_plt[2]],
+        #         c=color,
+        #         lw=lw_axis,
+        #     )
+
         C = _camera_center(R, T, convention)
         centers.append(C)
 
-        # 坐标轴（相机系在世界中的朝向）
         Rc2w = R.T if convention.lower() == "opencv" else R
         axes = np.eye(3) * axis_len
         axes_w = (Rc2w @ axes.T).T + C
@@ -115,7 +153,7 @@ def save_camera_positions_3d(
             rays_c = (np.linalg.inv(K) @ corners.T).T
             scale = frustum_depth / rays_c[:, 2:3]
             pts_c = rays_c * scale
-            pts_w = (Rc2w @ pts_c.T).T + C
+            pts_w = (Rc2w @ pts_c.T).T + C  # (4,3)
             for p in pts_w:
                 ax.plot([C[0], p[0]], [C[1], p[1]], [C[2], p[2]], lw=1, c="k")
             idx = [0, 1, 2, 3, 0]

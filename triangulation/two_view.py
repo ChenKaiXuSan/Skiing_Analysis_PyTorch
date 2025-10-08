@@ -29,6 +29,10 @@ from triangulation.camera_position.camera_position import (
     estimate_camera_pose_from_kpt,
     estimate_camera_pose_from_ORB,
     estimate_camera_pose_from_SIFT,
+    estimate_pose_from_bbox_region,
+)
+from triangulation.camera_position.camera_position_kpt_bbox import (
+    estimate_pose_from_bbox_and_kpt,
 )
 
 
@@ -114,7 +118,15 @@ class PoseLogger:
 
 # ---------- 你的流程，嵌入 PoseLogger ----------
 def process_two_video(
-    K, left_kpts, left_vframes, right_kpts, right_vframes, output_path, baseline_m
+    K,
+    left_kpts,
+    left_vframes,
+    left_bbox,
+    right_kpts,
+    right_vframes,
+    right_bbox,
+    output_path,
+    baseline_m,
 ):
     os.makedirs(output_path, exist_ok=True)
     os.makedirs(os.path.join(output_path, "camera"), exist_ok=True)
@@ -134,6 +146,9 @@ def process_two_video(
 
         l_frame = left_vframes[i] if left_vframes is not None else None
         r_frame = right_vframes[i] if right_vframes is not None else None
+
+        l_bbox = left_bbox[i] if left_bbox is not None else None
+        r_bbox = right_bbox[i] if right_bbox is not None else None
 
         # --- SIFT ---
         R, t, *_ = estimate_camera_pose_from_SIFT(l_frame, r_frame, K, baseline_m)
@@ -165,6 +180,24 @@ def process_two_video(
         )
         logger.add("ORB", i, Ro, to, baseline=baseline_m)
 
+        # --- BBOX区域特征 ---
+        Rb, tb, bbox_meta = estimate_pose_from_bbox_region(
+            l_frame, r_frame, l_bbox, r_bbox, K, baseline_m
+        )
+        save_camera(
+            K, Rb, tb, os.path.join(output_path, "camera/bbox"), f"camera_{i:04d}.png"
+        )
+        logger.add("BBOX", i, Rb, tb, baseline=baseline_m)
+
+        # --- KPT + BBOX 结合 ---
+        R_combined, t_combined, _, _ = estimate_pose_from_bbox_and_kpt(
+            l_frame, r_frame, l_bbox, r_bbox, K, baseline_m, kptsL=l_kpt, kptsR=r_kpt
+        )
+        save_camera(
+            K, R_combined, t_combined, os.path.join(output_path, "camera/combined"), f"camera_{i:04d}.png"
+        )
+        logger.add("COMBINED", i, R_combined, t_combined, baseline=baseline_m)
+
         # --- FIXED（演示：把右相机放到指定位置与朝向） ---
         def Ry(theta):
             c, s = np.cos(theta), np.sin(theta)
@@ -179,8 +212,8 @@ def process_two_video(
         logger.add("FIXED", i, R2, t2, note="demo_fixed_pose", z=20.0, yaw_deg=180.0)
 
     # --- 统一保存 ---
-    npz_path = os.path.join(output_path, "poses_all_methods.npz")
-    csv_path = os.path.join(output_path, "poses_summary.csv")
+    npz_path = os.path.join(output_path, "camera_position_all_methods.npz")
+    csv_path = os.path.join(output_path, "camera_position_summary.csv")
     logger.save_npz(npz_path)
     logger.save_csv(csv_path)
 

@@ -21,7 +21,10 @@ import hydra
 
 from triangulation.two_view import process_two_video
 
-from triangulation.load import load_keypoints_from_d2_pt, load_keypoints_from_yolo_pt
+from triangulation.load import (
+    load_kpt_and_bbox_from_d2_pt,
+    load_keypoints_from_yolo_pt,
+)
 
 from triangulation.reproject import reproject_and_visualize
 
@@ -55,11 +58,38 @@ from triangulation.vis.frame_visualization import (
 # )
 
 K = np.array(
-    [ 1116.9289548941917, 0., 955.77175993563799, 0.,
-       1117.3341496962166, 538.91061167202145, 0., 0., 1. ]
-).reshape(3,3)
+    [
+        1116.9289548941917,
+        0.0,
+        955.77175993563799,
+        0.0,
+        1117.3341496962166,
+        538.91061167202145,
+        0.0,
+        0.0,
+        1.0,
+    ]
+).reshape(3, 3)
 
-K_dist = np.array([0.17697328, -0.45675065, -0.0026601, -0.00330938, 0.35538705])
+# K_dist = np.array([0.17697328, -0.45675065, -0.0026601, -0.00330938, 0.35538705])
+K_dist = np.array(
+    [
+        -1.1940477842823853,
+        -15.440461757486913,
+        0.00013163161053023783,
+        0.00019082529328353381,
+        98.843073622415901,
+        -1.3588290520381034,
+        -14.555841222727574,
+        96.219667412855202,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+)
 
 
 # ---------- 三角测量 ----------
@@ -124,8 +154,17 @@ def process(left_path, right_path, out_dir, baseline_m):
     #     right_path
     # )
     # D2 关键点加载
-    left_kpts, left_kpts_score, left_vframes = load_keypoints_from_d2_pt(left_path)
-    right_kpts, right_kpts_score, right_vframes = load_keypoints_from_d2_pt(right_path)
+    left_kpts, left_kpts_score, left_bboxes_xyxy, left_bboxes_scores, left_vframes = (
+        load_kpt_and_bbox_from_d2_pt(left_path)
+    )
+
+    (
+        right_kpts,
+        right_kpts_score,
+        right_bboxes_xyxy,
+        right_bboxes_scores,
+        right_vframes,
+    ) = load_kpt_and_bbox_from_d2_pt(right_path)
 
     # ! 为了测试截断
     # num = 30
@@ -160,6 +199,7 @@ def process(left_path, right_path, out_dir, baseline_m):
         )
 
     # * process single view post-triage
+    # TODO: 如果单个视点可行的话，需要从单个视点来计算两个相机的R，T
     # process_one_video(
     #     K, left_kpts, left_vframes, os.path.join(out_dir, "single_view/left"), baseline_m=baseline_m,
     # )
@@ -168,15 +208,18 @@ def process(left_path, right_path, out_dir, baseline_m):
     #     K, right_kpts, right_vframes, os.path.join(out_dir, "single_view/right"), baseline_m=baseline_m,
     # )
 
-    # TODO: 如果单个视点可行的话，需要从单个视点来计算两个相机的R，T
+    # * 尝试使用bbox区域来提取特征
+
 
     # * process two view triangulation
     data = process_two_video(
         K=K,
         left_kpts=left_kpts,
         left_vframes=left_vframes,
+        left_bbox=left_bboxes_xyxy,
         right_kpts=right_kpts,
         right_vframes=right_vframes,
+        right_bbox=right_bboxes_xyxy,
         output_path=os.path.join(out_dir, "two_view"),
         baseline_m=baseline_m,
     )

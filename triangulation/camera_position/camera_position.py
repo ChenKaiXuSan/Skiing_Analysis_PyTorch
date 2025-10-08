@@ -202,4 +202,61 @@ def estimate_camera_pose_from_ORB(img1, img2, K, baseline_m, max_matches=1000):
         np.linalg.norm(C2), baseline_m, rtol=1e-6, atol=1e-9
     ), "baseline check failed"
 
-    return R, T.reshape(3,1), pose_mask
+    return R, T.reshape(3, 1), pose_mask
+
+
+def estimate_pose_from_bbox_region(imgL, imgR, bboxL, bboxR, K, baseline_m):
+    """
+    从左右图像的 bbox 区域中估计相机姿态
+    bbox: [x1, y1, x2, y2]
+    """
+
+    # 1. 裁剪区域
+    patchL = imgL[int(bboxL[1]) : int(bboxL[3]), int(bboxL[0]) : int(bboxL[2])]
+    patchR = imgR[int(bboxR[1]) : int(bboxR[3]), int(bboxR[0]) : int(bboxR[2])]
+
+    patchL = to_gray_cv_image(patchL)
+    patchR = to_gray_cv_image(patchR)
+    
+    # 2. SIFT 特征提取
+    sift = cv2.SIFT_create()
+    kp1, des1 = sift.detectAndCompute(patchL, None)
+    kp2, des2 = sift.detectAndCompute(patchR, None)
+
+    if des1 is None or des2 is None:
+        return None, None
+
+    # 3. 匹配
+    matcher = cv2.BFMatcher()
+    matches = matcher.knnMatch(des1, des2, k=2)
+    good = [
+        m[0] for m in matches if len(m) == 2 and m[0].distance < 0.75 * m[1].distance
+    ]
+
+    if len(good) < 5:
+        return None, None
+
+    pts1 = np.float32([kp1[m.queryIdx].pt for m in good])
+    pts2 = np.float32([kp2[m.trainIdx].pt for m in good])
+
+    # 4. 坐标偏移修正（恢复到整幅图坐标）
+    pts1[:, 0] += bboxL[0]
+    pts1[:, 1] += bboxL[1]
+    pts2[:, 0] += bboxR[0]
+    pts2[:, 1] += bboxR[1]
+
+    # 5. 估计姿态
+    E, mask = cv2.findEssentialMat(pts1, pts2, K, cv2.RANSAC, 0.999, 1.0)
+    if E is None:
+        return None, None
+    _, R, t, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
+
+    T = (t / np.linalg.norm(t)) * float(baseline_m)
+
+    # check
+    C2 = -R.T @ T
+    assert np.isclose(
+        np.linalg.norm(C2), baseline_m, rtol=1e-6, atol=1e-9
+    ), "baseline check failed"
+
+    return R, T.reshape(3, 1), mask_pose

@@ -22,3 +22,5 @@ paths:
   output: ${log_path}
 
 baseline_m: 20
+
+camera_position_method: kpt # kpt or bbox
