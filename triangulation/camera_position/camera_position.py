@@ -23,6 +23,39 @@ import numpy as np
 import cv2
 import torch
 
+def recover_pose_from_multiE(E, pts1, pts2, K):
+    # 规范化输入
+    pts1 = np.asarray(pts1, np.float64).reshape(-1, 2)
+    pts2 = np.asarray(pts2, np.float64).reshape(-1, 2)
+    assert len(pts1) >= 5 and len(pts1) == len(pts2)
+    assert K.shape == (3, 3)
+
+    # 把 (3N,3) 或 (N,9) 变成 (N,3,3)
+    E = np.asarray(E)
+    if E.shape == (3, 3):
+        E_list = [E]
+    elif E.ndim == 2 and E.shape[1] == 3 and E.shape[0] % 3 == 0:
+        E_list = [E[i:i+3, :] for i in range(0, E.shape[0], 3)]
+    elif E.ndim == 2 and E.shape[1] == 9:
+        E_list = [E[i].reshape(3, 3) for i in range(E.shape[0])]
+    else:
+        raise ValueError(f"Unexpected E shape: {E.shape}")
+
+    best = dict(inliers=-1, R=None, t=None, mask=None, E=None)
+
+    for Ei in E_list:
+        if not np.isfinite(Ei).all():  # 排除 NaN/Inf
+            continue
+        # 使用 recoverPose 评估该候选
+        inliers, R, t, mask = cv2.recoverPose(Ei, pts1, pts2, K)
+        if inliers > best["inliers"]:
+            best = dict(inliers=inliers, R=R, t=t, mask=mask, E=Ei)
+
+    if best["inliers"] <= 0 or best["R"] is None:
+        raise RuntimeError("No valid essential matrix candidate passed recoverPose")
+
+    return best["R"], best["t"], best["mask"], best["E"]
+
 
 def to_gray_cv_image(tensor_img):
     """
@@ -249,7 +282,8 @@ def estimate_pose_from_bbox_region(imgL, imgR, bboxL, bboxR, K, baseline_m):
     E, mask = cv2.findEssentialMat(pts1, pts2, K, cv2.RANSAC, 0.999, 1.0)
     if E is None:
         return None, None
-    _, R, t, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
+    # _, R, t, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
+    K, t, mask_pose, _ = recover_pose_from_multiE(E, pts1, pts2, K)
 
     T = (t / np.linalg.norm(t)) * float(baseline_m)
 
