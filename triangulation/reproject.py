@@ -8,6 +8,10 @@ from typing import Dict, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _as_float32(x) -> np.ndarray:
     return np.asarray(x, dtype=np.float32)
@@ -43,10 +47,13 @@ def _clip_xy(xy: np.ndarray, w: int, h: int) -> np.ndarray:
 
 
 def reproject_points(
-    X3: np.ndarray,               # (J,3) 3D points expressed in Cam1/world (Cam1) coords
-    K1: np.ndarray, dist1: Optional[np.ndarray],
-    K2: np.ndarray, dist2: Optional[np.ndarray],
-    R: np.ndarray, T: np.ndarray,  # Cam2 extrinsics w.r.t Cam1
+    X3: np.ndarray,  # (J,3) 3D points expressed in Cam1/world (Cam1) coords
+    K1: np.ndarray,
+    dist1: Optional[np.ndarray],
+    K2: np.ndarray,
+    dist2: Optional[np.ndarray],
+    R: np.ndarray,
+    T: np.ndarray,  # Cam2 extrinsics w.r.t Cam1
 ) -> Dict[str, np.ndarray]:
     """
     使用 cv2.projectPoints 将 3D 点投影到 Cam1/Cam2 像平面（考虑畸变）。
@@ -79,10 +86,10 @@ def reproject_points(
 def render_reprojection_panel(
     img1: np.ndarray,
     img2: np.ndarray,
-    kptL: np.ndarray,             # (J,2) observed pixels in left/cam1
-    kptR: np.ndarray,             # (J,2) observed pixels in right/cam2
-    proj_L: np.ndarray,           # (J,2) reprojected pixels
-    proj_R: np.ndarray,           # (J,2)
+    kptL: np.ndarray,  # (J,2) observed pixels in left/cam1
+    kptR: np.ndarray,  # (J,2) observed pixels in right/cam2
+    proj_L: np.ndarray,  # (J,2) reprojected pixels
+    proj_R: np.ndarray,  # (J,2)
     joint_names: Optional[Sequence[str]] = None,
     circle_r: int = 5,
     thickness: int = 2,
@@ -103,10 +110,18 @@ def render_reprojection_panel(
         target_h = max(vis1.shape[0], vis2.shape[0])
         if vis1.shape[0] != target_h:
             scale = target_h / vis1.shape[0]
-            vis1 = cv2.resize(vis1, (int(vis1.shape[1] * scale), target_h), interpolation=cv2.INTER_LINEAR)
+            vis1 = cv2.resize(
+                vis1,
+                (int(vis1.shape[1] * scale), target_h),
+                interpolation=cv2.INTER_LINEAR,
+            )
         if vis2.shape[0] != target_h:
             scale = target_h / vis2.shape[0]
-            vis2 = cv2.resize(vis2, (int(vis2.shape[1] * scale), target_h), interpolation=cv2.INTER_LINEAR)
+            vis2 = cv2.resize(
+                vis2,
+                (int(vis2.shape[1] * scale), target_h),
+                interpolation=cv2.INTER_LINEAR,
+            )
 
     # 绘制函数
     def _draw(vis: np.ndarray, obs: np.ndarray, rep: np.ndarray) -> np.ndarray:
@@ -127,8 +142,21 @@ def render_reprojection_panel(
             # 误差向量-青色
             cv2.line(vis, o_i, r_i, (255, 255, 0), 1, cv2.LINE_AA)
             # 标注
-            label = str(joint_names[j]) if (joint_names is not None and j < len(joint_names)) else str(j)
-            cv2.putText(vis, label, (o_i[0] + 6, o_i[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
+            label = (
+                str(joint_names[j])
+                if (joint_names is not None and j < len(joint_names))
+                else str(j)
+            )
+            cv2.putText(
+                vis,
+                label,
+                (o_i[0] + 6, o_i[1] - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (0, 255, 0),
+                1,
+                cv2.LINE_AA,
+            )
         return vis
 
     visL = _draw(vis1.copy(), kptL, proj_L)
@@ -137,8 +165,8 @@ def render_reprojection_panel(
     # 计算误差统计
     errL = np.linalg.norm(np.asarray(proj_L, float) - np.asarray(kptL, float), axis=1)
     errR = np.linalg.norm(np.asarray(proj_R, float) - np.asarray(kptR, float), axis=1)
-    rmseL = float(np.sqrt(np.nanmean(errL ** 2)))
-    rmseR = float(np.sqrt(np.nanmean(errR ** 2)))
+    rmseL = float(np.sqrt(np.nanmean(errL**2)))
+    rmseR = float(np.sqrt(np.nanmean(errR**2)))
 
     # 拼接面板
     h = max(visL.shape[0], visR.shape[0])
@@ -148,10 +176,26 @@ def render_reprojection_panel(
     panel[: visR.shape[0], visL.shape[1] : visL.shape[1] + visR.shape[1]] = visR
 
     # 标题与统计
-    cv2.putText(panel, f"{title_left} | RMSE={rmseL:.2f}px  (mean={np.nanmean(errL):.2f}, med={np.nanmedian(errL):.2f}, max={np.nanmax(errL):.2f})",
-                (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
-    cv2.putText(panel, f"{title_right} | RMSE={rmseR:.2f}px  (mean={np.nanmean(errR):.2f}, med={np.nanmedian(errR):.2f}, max={np.nanmax(errR):.2f})",
-                (visL.shape[1] + 20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(
+        panel,
+        f"{title_left} | RMSE={rmseL:.2f}px  (mean={np.nanmean(errL):.2f}, med={np.nanmedian(errL):.2f}, max={np.nanmax(errL):.2f})",
+        (20, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        panel,
+        f"{title_right} | RMSE={rmseR:.2f}px  (mean={np.nanmean(errR):.2f}, med={np.nanmedian(errR):.2f}, max={np.nanmax(errR):.2f})",
+        (visL.shape[1] + 20, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
 
     return visL, visR, panel
 
@@ -159,12 +203,15 @@ def render_reprojection_panel(
 def reproject_and_visualize(
     img1: np.ndarray,
     img2: np.ndarray,
-    X3: np.ndarray,                  # (J,3) in Cam1/world (Cam1) coords
-    kptL: np.ndarray,                # (J,2) observed pixels in cam1
-    kptR: np.ndarray,                # (J,2) observed pixels in cam2
-    K1: np.ndarray, dist1: Optional[np.ndarray],
-    K2: np.ndarray, dist2: Optional[np.ndarray],
-    R: np.ndarray, T: np.ndarray,
+    X3: np.ndarray,  # (J,3) in Cam1/world (Cam1) coords
+    kptL: np.ndarray,  # (J,2) observed pixels in cam1
+    kptR: np.ndarray,  # (J,2) observed pixels in cam2
+    K1: np.ndarray,
+    dist1: Optional[np.ndarray],
+    K2: np.ndarray,
+    dist2: Optional[np.ndarray],
+    R: np.ndarray,
+    T: np.ndarray,
     joint_names: Optional[Sequence[str]] = None,
     circle_r: int = 5,
     thickness: int = 2,
@@ -181,8 +228,15 @@ def reproject_and_visualize(
 
     # 2) 面板渲染
     visL, visR, panel = render_reprojection_panel(
-        img1, img2, kptL, kptR, proj_L, proj_R,
-        joint_names=joint_names, circle_r=circle_r, thickness=thickness
+        img1,
+        img2,
+        kptL,
+        kptR,
+        proj_L,
+        proj_R,
+        joint_names=joint_names,
+        circle_r=circle_r,
+        thickness=thickness,
     )
 
     # 3) 误差统计
@@ -197,8 +251,8 @@ def reproject_and_visualize(
         "proj_R": proj_R,
         "err_L": errL,
         "err_R": errR,
-        "rmse_L": float(np.sqrt(np.nanmean(errL ** 2))),
-        "rmse_R": float(np.sqrt(np.nanmean(errR ** 2))),
+        "rmse_L": float(np.sqrt(np.nanmean(errL**2))),
+        "rmse_R": float(np.sqrt(np.nanmean(errR**2))),
         "mean_err_L": float(np.nanmean(errL)),
         "mean_err_R": float(np.nanmean(errR)),
         "median_err_L": float(np.nanmedian(errL)),
@@ -206,7 +260,7 @@ def reproject_and_visualize(
         "max_err_L": float(np.nanmax(errL)),
         "max_err_R": float(np.nanmax(errR)),
         "out_path": str(out_path),
-        "vis_left": visL,   # 如不需要可删
+        "vis_left": visL,  # 如不需要可删
         "vis_right": visR,  # 如不需要可删
-        "panel": panel,     # 如不需要可删
+        "panel": panel,  # 如不需要可删
     }

@@ -22,6 +22,9 @@ Date      	By	Comments
 import os
 import csv
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 from triangulation.vis.camera import save_camera
 
@@ -131,7 +134,7 @@ def process_two_video(
     os.makedirs(output_path, exist_ok=True)
     os.makedirs(os.path.join(output_path, "camera"), exist_ok=True)
 
-    logger = PoseLogger()  # ← 新增
+    pose_logger = PoseLogger()  # ← 新增
 
     if left_kpts.shape[0] != right_kpts.shape[0]:
         raise ValueError(
@@ -153,18 +156,18 @@ def process_two_video(
         # --- SIFT ---
         R, t, *_ = estimate_camera_pose_from_SIFT(l_frame, r_frame, K, baseline_m)
         save_camera(
-            K, R, t, os.path.join(output_path, "camera/SIFT"), f"camera_{i:04d}.png"
+            K, R, t, os.path.join(output_path, "camera/SIFT"), frame_num=i
         )
-        logger.add("SIFT", i, R, t, baseline=baseline_m)
+        pose_logger.add("SIFT", i, R, t, baseline=baseline_m)
 
         # --- KPT（注意：你原代码 baseline_m=20 是硬编码，这里保留但也记录到meta） ---
         Rk, tk, mask_pose = estimate_camera_pose_from_kpt(
             l_kpt, r_kpt, K, baseline_m=20
         )
         save_camera(
-            K, Rk, tk, os.path.join(output_path, "camera/kpt"), f"camera_{i:04d}.png"
+            K, Rk, tk, os.path.join(output_path, "camera/kpt"), frame_num=i
         )
-        logger.add(
+        pose_logger.add(
             "KPT",
             i,
             Rk,
@@ -176,27 +179,31 @@ def process_two_video(
         # --- ORB ---
         Ro, to, *_ = estimate_camera_pose_from_ORB(l_frame, r_frame, K, baseline_m)
         save_camera(
-            K, Ro, to, os.path.join(output_path, "camera/ORB"), f"camera_{i:04d}.png"
+            K, Ro, to, os.path.join(output_path, "camera/ORB"), frame_num=i
         )
-        logger.add("ORB", i, Ro, to, baseline=baseline_m)
+        pose_logger.add("ORB", i, Ro, to, baseline=baseline_m)
 
         # --- BBOX区域特征 ---
         Rb, tb, bbox_meta = estimate_pose_from_bbox_region(
             l_frame, r_frame, l_bbox, r_bbox, K, baseline_m
         )
         save_camera(
-            K, Rb, tb, os.path.join(output_path, "camera/bbox"), f"camera_{i:04d}.png"
+            K, Rb, tb, os.path.join(output_path, "camera/bbox"), frame_num=i
         )
-        logger.add("BBOX", i, Rb, tb, baseline=baseline_m)
+        pose_logger.add("BBOX", i, Rb, tb, baseline=baseline_m)
 
         # --- KPT + BBOX 结合 ---
         R_combined, t_combined, _, _ = estimate_pose_from_bbox_and_kpt(
             l_frame, r_frame, l_bbox, r_bbox, K, baseline_m, kptsL=l_kpt, kptsR=r_kpt
         )
         save_camera(
-            K, R_combined, t_combined, os.path.join(output_path, "camera/combined"), f"camera_{i:04d}.png"
+            K,
+            R_combined,
+            t_combined,
+            os.path.join(output_path, "camera/combined"),
+            f"camera_{i:04d}.png",
         )
-        logger.add("COMBINED", i, R_combined, t_combined, baseline=baseline_m)
+        pose_logger.add("COMBINED", i, R_combined, t_combined, baseline=baseline_m)
 
         # --- FIXED（演示：把右相机放到指定位置与朝向） ---
         def Ry(theta):
@@ -207,15 +214,17 @@ def process_two_video(
         R2 = Ry(np.deg2rad(180.0))  # 对视（绕y转180°）
         t2 = -R2 @ C2  # t = -R C
         save_camera(
-            K, R2, t2, os.path.join(output_path, "camera/fixed"), f"camera_{i:04d}.png"
+            K, R2, t2, os.path.join(output_path, "camera/fixed"), frame_num=i
         )
-        logger.add("FIXED", i, R2, t2, note="demo_fixed_pose", z=20.0, yaw_deg=180.0)
+        pose_logger.add(
+            "FIXED", i, R2, t2, note="demo_fixed_pose", z=20.0, yaw_deg=180.0
+        )
 
     # --- 统一保存 ---
     npz_path = os.path.join(output_path, "camera_position_all_methods.npz")
     csv_path = os.path.join(output_path, "camera_position_summary.csv")
-    logger.save_npz(npz_path)
-    logger.save_csv(csv_path)
+    pose_logger.save_npz(npz_path)
+    pose_logger.save_csv(csv_path)
 
-    print(f"[OK] Saved poses:\n- {npz_path}\n- {csv_path}")
-    return logger.data
+    logger.info(f"Saved poses:\n- {npz_path}\n- {csv_path}")
+    return pose_logger.data

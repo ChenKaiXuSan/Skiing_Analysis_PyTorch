@@ -13,11 +13,9 @@ import numpy as np
 import cv2
 import glob
 import hydra
+import logging
 
-# from triangulation.estimate_camera_position import (
-#     process_two_video,
-#     process_one_video,
-# )
+logger = logging.getLogger(__name__)
 
 from triangulation.two_view import process_two_video
 
@@ -28,11 +26,6 @@ from triangulation.load import (
 
 from triangulation.reproject import reproject_and_visualize
 
-from triangulation.postprocess import (
-    post_triage_single,
-    post_triage_sequence,
-)
-
 # vis
 from triangulation.vis.pose_visualization import (
     visualize_3d_joints,
@@ -41,6 +34,8 @@ from triangulation.vis.pose_visualization import (
 from triangulation.vis.frame_visualization import (
     draw_and_save_keypoints_from_frame,
 )
+
+from triangulation.save import save_3d_joints
 
 # ---------- 相机参数 ----------
 # K = np.array(
@@ -108,6 +103,8 @@ def process_triangulate(
     left_kpts, right_kpts, left_vframes, right_vframes, K, R, T, output_path
 ):
 
+    joints_3d_all = []
+
     for l_kpt, r_kpt, l_frame, r_frame, r, t, i in zip(
         left_kpts, right_kpts, left_vframes, right_vframes, R, T, range(len(left_kpts))
     ):
@@ -143,11 +140,17 @@ def process_triangulate(
             joint_names=None,  # 或者传 COCO 的关节名列表
             out_path=os.path.join(output_path, "reproj", f"{i:04d}.jpg"),
         )
-        print(res["mean_err_L"], res["mean_err_R"])
-        print("Saved to:", res["out_path"])
+        logger.info(f"Saved to: {res['out_path']}")
+        logger.info(
+            f"Reprojection error - Frame {i}: Left {res['mean_err_L']:.2f}px, Right {res['mean_err_R']:.2f}px"
+        )
+
+        joints_3d_all.append(joints_3d)
+
+    return joints_3d_all
 
 
-def process(left_path, right_path, out_dir, baseline_m):
+def process(left_path, right_path, out_dir, baseline_m, kpt_vis_save=False):
     # YOLO 关键点加载
     # left_kpts, left_kpts_score, left_vframes = load_keypoints_from_yolo_pt(left_path)
     # right_kpts, right_kpts_score, right_vframes = load_keypoints_from_yolo_pt(
@@ -167,7 +170,7 @@ def process(left_path, right_path, out_dir, baseline_m):
     ) = load_kpt_and_bbox_from_d2_pt(right_path)
 
     # ! 为了测试截断
-    # num = 30
+    num = 10
     # left_kpts = left_kpts[:num]
     # left_vframes = left_vframes[:num]
     # right_kpts = right_kpts[:num]
@@ -185,18 +188,19 @@ def process(left_path, right_path, out_dir, baseline_m):
         l_frame = left_vframes[i] if left_vframes is not None else None
         r_frame = right_vframes[i] if right_vframes is not None else None
 
-        draw_and_save_keypoints_from_frame(
-            l_frame,
-            l_kpt,
-            os.path.join(out_dir, "keypoint_vis/left_frame", f"{i:04d}.png"),
-            color=(0, 255, 0),
-        )
-        draw_and_save_keypoints_from_frame(
-            r_frame,
-            r_kpt,
-            os.path.join(out_dir, "keypoint_vis/right_frame", f"{i:04d}.png"),
-            color=(0, 0, 255),
-        )
+        if kpt_vis_save:
+            draw_and_save_keypoints_from_frame(
+                l_frame,
+                l_kpt,
+                os.path.join(out_dir, "keypoint_vis/left_frame", f"{i:04d}.png"),
+                color=(0, 255, 0),
+            )
+            draw_and_save_keypoints_from_frame(
+                r_frame,
+                r_kpt,
+                os.path.join(out_dir, "keypoint_vis/right_frame", f"{i:04d}.png"),
+                color=(0, 0, 255),
+            )
 
     # * process single view post-triage
     # TODO: 如果单个视点可行的话，需要从单个视点来计算两个相机的R，T
@@ -207,9 +211,6 @@ def process(left_path, right_path, out_dir, baseline_m):
     # process_one_video(
     #     K, right_kpts, right_vframes, os.path.join(out_dir, "single_view/right"), baseline_m=baseline_m,
     # )
-
-    # * 尝试使用bbox区域来提取特征
-
 
     # * process two view triangulation
     data = process_two_video(
@@ -231,7 +232,7 @@ def process(left_path, right_path, out_dir, baseline_m):
         t_list = v["t"]
         frame_num = v["frame"]
 
-        process_triangulate(
+        joints_3d_al = process_triangulate(
             left_kpts=left_kpts,
             right_kpts=right_kpts,
             left_vframes=left_vframes,
@@ -242,6 +243,20 @@ def process(left_path, right_path, out_dir, baseline_m):
             output_path=_out_dir,
         )
 
+        # * save 3d joints
+        _joint_3d_data_out_dir = os.path.join(out_dir, "joints_3d", method)
+        for i, joints_3d, r, t in zip(frame_num, joints_3d_al, r_list, t_list):
+
+            save_3d_joints(
+                joints_3d,
+                save_dir=os.path.join(_joint_3d_data_out_dir),
+                frame_idx=i,
+                r=r,
+                t=t,
+                video_path={"left": left_path, "right": right_path},
+                fmt="json",
+            )
+
 
 # ---------- 多人批量处理入口 ----------
 @hydra.main(config_path="../configs", config_name="triangulation")
@@ -250,19 +265,20 @@ def main_pt(config):
     input_root = config.paths.input
     output_root = config.paths.output
     baseline_m = config.baseline_m
+    kpt_vis_save = config.keypoint_vis
 
     subjects = sorted(glob.glob(f"{input_root}/*/"))
     if not subjects:
         raise FileNotFoundError(f"No folders found in: {input_root}")
-    print(f"[INFO] Found {len(subjects)} subjects in {input_root}")
+    logger.info(f"Found {len(subjects)} subjects in {input_root}")
     for person_dir in subjects:
         person_name = os.path.basename(person_dir.rstrip("/"))
-        print(f"\n[INFO] Processing: {person_name}")
+        logger.info(f"Processing: {person_name}")
         left = os.path.join(person_dir, "osmo_1.pt")
         right = os.path.join(person_dir, "osmo_2.pt")
         out_dir = os.path.join(output_root, person_name)
 
-        process(left, right, out_dir, baseline_m=baseline_m)
+        process(left, right, out_dir, baseline_m=baseline_m, kpt_vis_save=kpt_vis_save)
 
 
 if __name__ == "__main__":

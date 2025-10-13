@@ -23,6 +23,7 @@ import numpy as np
 import cv2
 import torch
 
+
 def recover_pose_from_multiE(E, pts1, pts2, K):
     # 规范化输入
     pts1 = np.asarray(pts1, np.float64).reshape(-1, 2)
@@ -35,7 +36,7 @@ def recover_pose_from_multiE(E, pts1, pts2, K):
     if E.shape == (3, 3):
         E_list = [E]
     elif E.ndim == 2 and E.shape[1] == 3 and E.shape[0] % 3 == 0:
-        E_list = [E[i:i+3, :] for i in range(0, E.shape[0], 3)]
+        E_list = [E[i : i + 3, :] for i in range(0, E.shape[0], 3)]
     elif E.ndim == 2 and E.shape[1] == 9:
         E_list = [E[i].reshape(3, 3) for i in range(E.shape[0])]
     else:
@@ -250,14 +251,14 @@ def estimate_pose_from_bbox_region(imgL, imgR, bboxL, bboxR, K, baseline_m):
 
     patchL = to_gray_cv_image(patchL)
     patchR = to_gray_cv_image(patchR)
-    
+
     # 2. SIFT 特征提取
     sift = cv2.SIFT_create()
     kp1, des1 = sift.detectAndCompute(patchL, None)
     kp2, des2 = sift.detectAndCompute(patchR, None)
 
     if des1 is None or des2 is None:
-        return None, None
+        return np.eye(3), np.zeros((3, 1)), None # 无特征，返回默认值
 
     # 3. 匹配
     matcher = cv2.BFMatcher()
@@ -267,7 +268,7 @@ def estimate_pose_from_bbox_region(imgL, imgR, bboxL, bboxR, K, baseline_m):
     ]
 
     if len(good) < 5:
-        return None, None
+        return np.eye(3), np.zeros((3, 1)), None # 匹配点太少，返回默认值
 
     pts1 = np.float32([kp1[m.queryIdx].pt for m in good])
     pts2 = np.float32([kp2[m.trainIdx].pt for m in good])
@@ -281,9 +282,9 @@ def estimate_pose_from_bbox_region(imgL, imgR, bboxL, bboxR, K, baseline_m):
     # 5. 估计姿态
     E, mask = cv2.findEssentialMat(pts1, pts2, K, cv2.RANSAC, 0.999, 1.0)
     if E is None:
-        return None, None
-    # _, R, t, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
-    K, t, mask_pose, _ = recover_pose_from_multiE(E, pts1, pts2, K)
+        return None, None, None
+
+    R, t, mask_pose, _ = recover_pose_from_multiE(E, pts1, pts2, K)
 
     T = (t / np.linalg.norm(t)) * float(baseline_m)
 

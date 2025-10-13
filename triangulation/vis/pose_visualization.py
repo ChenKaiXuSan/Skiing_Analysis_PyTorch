@@ -9,6 +9,9 @@ from typing import Iterable, List, Optional, Sequence, Tuple, Union
 import matplotlib
 import numpy as np
 import torch
+import logging
+
+logger = logging.getLogger(__name__)
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -40,7 +43,6 @@ COCO_SKELETON: List[Tuple[int, int]] = [
 __all__ = [
     "COCO_SKELETON",
     "draw_camera",
-    "set_axes_equal",
     "visualize_3d_joints",
     "visualize_3d_scene_interactive",
     "compute_bone_lengths",

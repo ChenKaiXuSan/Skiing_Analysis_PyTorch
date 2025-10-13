@@ -8,11 +8,15 @@ import numpy as np
 import torch
 from torchvision.io import read_video
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _load_pt(file_path: str) -> Dict[str, Any]:
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Missing file: {file_path}")
-    print(f"[INFO] Loading: {file_path}")
+    logger.info(f"Loading: {file_path}")
     return torch.load(file_path, map_location="cpu")
 
 
@@ -45,7 +49,7 @@ def _get_frames_and_shape(
             if frames.dim() == 4:
                 H, W = int(frames.shape[1]), int(frames.shape[2])
         except Exception as e:
-            print(f"[WARN] Failed to load frames_path: {data['frames_path']} ({e})")
+            logger.warning(f"Failed to load frames_path: {data['frames_path']} ({e})")
 
     # 3) 元数据里的 img_shape
     if (H is None or W is None) and isinstance(data.get("img_shape"), (tuple, list)):
