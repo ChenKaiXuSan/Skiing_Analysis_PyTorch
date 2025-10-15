@@ -51,7 +51,6 @@ __all__ = [
 
 # ---- 新增：骨长计算 ----
 
-
 def compute_bone_lengths(
     pts: np.ndarray,
     skeleton: Iterable[Tuple[int, int]],
