@@ -170,11 +170,21 @@ def process(left_path, right_path, out_dir, baseline_m, kpt_vis_save=False):
     ) = load_kpt_and_bbox_from_d2_pt(right_path)
 
     # ! 为了测试截断
-    num = 10
+    # num = 10
     # left_kpts = left_kpts[:num]
     # left_vframes = left_vframes[:num]
     # right_kpts = right_kpts[:num]
     # right_vframes = right_vframes[:num]
+
+    # * process single view post-triage
+    # TODO: 如果单个视点可行的话，需要从单个视点来计算两个相机的R，T
+    # process_one_video(
+    #     K, left_kpts, left_vframes, os.path.join(out_dir, "single_view/left"), baseline_m=baseline_m,
+    # )
+
+    # process_one_video(
+    #     K, right_kpts, right_vframes, os.path.join(out_dir, "single_view/right"), baseline_m=baseline_m,
+    # )
 
     # * draw keypoints on frames and save
     for i in range(left_kpts.shape[0]):
@@ -201,16 +211,6 @@ def process(left_path, right_path, out_dir, baseline_m, kpt_vis_save=False):
                 os.path.join(out_dir, "keypoint_vis/right_frame", f"{i:04d}.png"),
                 color=(0, 0, 255),
             )
-
-    # * process single view post-triage
-    # TODO: 如果单个视点可行的话，需要从单个视点来计算两个相机的R，T
-    # process_one_video(
-    #     K, left_kpts, left_vframes, os.path.join(out_dir, "single_view/left"), baseline_m=baseline_m,
-    # )
-
-    # process_one_video(
-    #     K, right_kpts, right_vframes, os.path.join(out_dir, "single_view/right"), baseline_m=baseline_m,
-    # )
 
     # * process two view triangulation
     data = process_two_video(
