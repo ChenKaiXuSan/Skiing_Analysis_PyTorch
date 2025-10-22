@@ -213,7 +213,7 @@ def save_camera_positions_topdown(
     centers = np.vstack(centers)
     look_dirs = np.vstack(look_dirs)
 
-    ax.set_xlim(-10, 10)
+    ax.set_xlim(-50, 50)
     ax.set_ylim(-10, 30)
     ax.set_xlabel("X")
     ax.set_ylabel("Z")
