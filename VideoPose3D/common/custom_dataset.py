@@ -7,7 +7,7 @@
 
 import numpy as np
 import torch
-import copy
+from pathlib import Path
 from VideoPose3D.common.skeleton import Skeleton
 from VideoPose3D.common.camera import normalize_screen_coordinates, image_coordinates
 
@@ -103,32 +103,31 @@ class MocapDataset:
 
 
 class CustomDataset(MocapDataset):
-    def __init__(self, detections_path, remove_static_joints=True):
+    def __init__(self, pt_path: Path, remove_static_joints=True):
         super().__init__(fps=None, skeleton=h36m_skeleton)
 
-        # Load serialized dataset
-        # data = np.load(detections_path, allow_pickle=True)
         # TODO: 这里从pt文件加载
-        data = torch.load(detections_path)
-        resolutions = data["metadata"].item()["video_metadata"]
+        pt_data = torch.load(pt_path)
+        video_name = pt_data["video_name"]
 
         self._cameras = {}
         self._data = {}
-        for video_name, res in resolutions.items():
-            cam = {}
-            cam.update(custom_camera_params)
-            cam["orientation"] = np.array(cam["orientation"], dtype="float32")
-            cam["translation"] = np.array(cam["translation"], dtype="float32")
-            cam["translation"] = cam["translation"] / 1000  # mm to meters
 
-            cam["id"] = video_name
-            W, H = res["img_shape"]
-            cam["res_w"] = W
-            cam["res_h"] = H
+        cam = {}
+        cam.update(custom_camera_params)
+        cam["orientation"] = np.array(cam["orientation"], dtype="float32")
+        cam["translation"] = np.array(cam["translation"], dtype="float32")
+        cam["translation"] = cam["translation"] / 1000  # mm to meters
 
-            self._cameras[video_name] = [cam]
+        cam["id"] = video_name
 
-            self._data[video_name] = {"custom": {"cameras": cam}}
+        H, W = pt_data["img_shape"]
+        cam["res_w"] = W
+        cam["res_h"] = H
+
+        self._cameras[video_name] = [cam]
+
+        self._data[video_name] = {"custom": {"cameras": cam}}
 
         if remove_static_joints:
             # Bring the skeleton to 17 joints instead of the original 32

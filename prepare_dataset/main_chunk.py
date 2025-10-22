@@ -107,7 +107,6 @@ def process_video_chunked(
     config,
     person: str,
     video_path: Path,
-    *,
     chunk_size: int = 128,  # 每块帧数（除第一块外实际读取 N+1，含 1 帧重叠）
 ) -> Dict[str, Any]:
     """
