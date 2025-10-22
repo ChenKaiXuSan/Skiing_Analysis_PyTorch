@@ -1,12 +1,10 @@
 # hydra config
 hydra:
   run:
-    dir: ${log_path}
+    dir: ${paths.log_path}
   job:
     chdir: false
 
-pt_path: /workspace/data/pt
-log_path: logs/triangulated/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 camera:
   matrix:
@@ -18,10 +16,15 @@ camera:
   image_size: [1920, 1080]
 
 paths:
-  input: /workspace/data/pt
-  output: ${log_path}
+  pt_path: /workspace/data/pt
+  log_path: logs/triangulated/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 baseline_m: 20
 
 camera_position_method: kpt # kpt or bbox
 keypoint_vis: false
+
+visualize:
+  reproject: true
+  keypoint_3d_vis: true
+  keypoint_vis: false

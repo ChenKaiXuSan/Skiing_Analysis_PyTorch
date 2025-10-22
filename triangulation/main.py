@@ -10,25 +10,20 @@ Last Modified: August 4th, 2025
 
 import os
 import numpy as np
-import cv2
 import glob
 import hydra
 import logging
+from pathlib import Path
+from omegaconf import DictConfig, OmegaConf
 
 logger = logging.getLogger(__name__)
 
-from triangulation.two_view import process_two_video
+from triangulation.view_process.two_view import process_two_video
+from triangulation.view_process.single_view import process_single_video
 
 from triangulation.load import (
     load_kpt_and_bbox_from_d2_pt,
     load_keypoints_from_yolo_pt,
-)
-
-from triangulation.reproject import reproject_and_visualize
-
-# vis
-from triangulation.vis.pose_visualization import (
-    visualize_3d_joints,
 )
 
 from triangulation.vis.frame_visualization import (
@@ -36,6 +31,7 @@ from triangulation.vis.frame_visualization import (
 )
 
 from triangulation.save import save_3d_joints
+from triangulation.triangulate import process_triangulate
 
 # ---------- 相机参数 ----------
 # K = np.array(
@@ -87,70 +83,13 @@ K_dist = np.array(
 )
 
 
-# ---------- 三角测量 ----------
-def triangulate_joints(keypoints1, keypoints2, K, R, T):
-    if keypoints1.shape != keypoints2.shape or keypoints1.shape[1] != 2:
-        raise ValueError(
-            f"Keypoints shape mismatch: {keypoints1.shape} vs {keypoints2.shape}"
-        )
-    P1 = K @ np.hstack((np.eye(3), np.zeros((3, 1))))
-    P2 = K @ np.hstack((R, T.reshape(3, 1)))
-    pts_4d = cv2.triangulatePoints(P1, P2, keypoints1.T, keypoints2.T)
-    return (pts_4d[:3, :] / pts_4d[3, :]).T
-
-
-def process_triangulate(
-    left_kpts, right_kpts, left_vframes, right_vframes, K, R, T, output_path
+def process(
+    left_path: Path,
+    right_path: Path,
+    out_dir: Path,
+    baseline_m: int,
+    vis_options: DictConfig,
 ):
-
-    joints_3d_all = []
-
-    for l_kpt, r_kpt, l_frame, r_frame, r, t, i in zip(
-        left_kpts, right_kpts, left_vframes, right_vframes, R, T, range(len(left_kpts))
-    ):
-        W, H = l_frame.shape[1], l_frame.shape[0]
-
-        # * 这里是没有过滤的3d pose
-        joints_3d = triangulate_joints(l_kpt, r_kpt, K, r, t)
-
-        # * 可视化3d关节
-        visualize_3d_joints(
-            joints_3d=joints_3d,
-            R=r,
-            T=t,
-            K=K,
-            image_size=(W, H),
-            save_path=os.path.join(output_path, f"frame_{i:04d}.png"),
-            title=f"Frame {i} - 3D Joints",
-            y_up=True,
-        )
-
-        res = reproject_and_visualize(
-            img1=l_frame,
-            img2=r_frame,
-            X3=joints_3d,
-            kptL=l_kpt,  # (J,2)
-            kptR=r_kpt,  # (J,2)
-            K1=K,
-            dist1=K_dist,
-            K2=K,
-            dist2=K_dist,
-            R=r,
-            T=t,  # 注意：T要用“有尺度”的（基线已缩放）
-            joint_names=None,  # 或者传 COCO 的关节名列表
-            out_path=os.path.join(output_path, "reproj", f"{i:04d}.jpg"),
-        )
-        logger.info(f"Saved to: {res['out_path']}")
-        logger.info(
-            f"Reprojection error - Frame {i}: Left {res['mean_err_L']:.2f}px, Right {res['mean_err_R']:.2f}px"
-        )
-
-        joints_3d_all.append(joints_3d)
-
-    return joints_3d_all
-
-
-def process(left_path, right_path, out_dir, baseline_m, kpt_vis_save=False):
     # YOLO 关键点加载
     # left_kpts, left_kpts_score, left_vframes = load_keypoints_from_yolo_pt(left_path)
     # right_kpts, right_kpts_score, right_vframes = load_keypoints_from_yolo_pt(
@@ -170,35 +109,26 @@ def process(left_path, right_path, out_dir, baseline_m, kpt_vis_save=False):
     ) = load_kpt_and_bbox_from_d2_pt(right_path)
 
     # ! 为了测试截断
-    # num = 10
+    num = 10
     # left_kpts = left_kpts[:num]
     # left_vframes = left_vframes[:num]
     # right_kpts = right_kpts[:num]
     # right_vframes = right_vframes[:num]
 
-    # * process single view post-triage
-    # TODO: 如果单个视点可行的话，需要从单个视点来计算两个相机的R，T
-    # process_one_video(
-    #     K, left_kpts, left_vframes, os.path.join(out_dir, "single_view/left"), baseline_m=baseline_m,
-    # )
-
-    # process_one_video(
-    #     K, right_kpts, right_vframes, os.path.join(out_dir, "single_view/right"), baseline_m=baseline_m,
-    # )
-
     # * draw keypoints on frames and save
-    for i in range(left_kpts.shape[0]):
-        l_kpt, r_kpt = left_kpts[i], right_kpts[i]
+    if vis_options.keypoint_vis:
 
-        # drop the 0 value keypoints
-        assert (
-            l_kpt.shape == r_kpt.shape
-        ), f"Keypoints shape mismatch: {l_kpt.shape} vs {r_kpt.shape}"
+        for i in range(left_kpts.shape[0]):
+            l_kpt, r_kpt = left_kpts[i], right_kpts[i]
 
-        l_frame = left_vframes[i] if left_vframes is not None else None
-        r_frame = right_vframes[i] if right_vframes is not None else None
+            # drop the 0 value keypoints
+            assert (
+                l_kpt.shape == r_kpt.shape
+            ), f"Keypoints shape mismatch: {l_kpt.shape} vs {r_kpt.shape}"
 
-        if kpt_vis_save:
+            l_frame = left_vframes[i] if left_vframes is not None else None
+            r_frame = right_vframes[i] if right_vframes is not None else None
+
             draw_and_save_keypoints_from_frame(
                 l_frame,
                 l_kpt,
@@ -211,6 +141,26 @@ def process(left_path, right_path, out_dir, baseline_m, kpt_vis_save=False):
                 os.path.join(out_dir, "keypoint_vis/right_frame", f"{i:04d}.png"),
                 color=(0, 0, 255),
             )
+
+    # * process single view post-triage
+    # TODO: 如果单个视点可行的话，需要从单个视点来计算两个相机的R，T
+    left_data = process_single_video(
+        K=K,
+        single_kpts=left_kpts,
+        single_vframes=left_vframes,
+        single_bbox=left_bboxes_xyxy,
+        output_path=os.path.join(out_dir, "single_view/left"),
+        baseline_m=baseline_m,
+    )
+
+    right_data = process_single_video(
+        K=K,
+        single_kpts=right_kpts,
+        single_vframes=right_vframes,
+        single_bbox=right_bboxes_xyxy,
+        output_path=os.path.join(out_dir, "single_view/right"),
+        baseline_m=baseline_m,
+    )
 
     # * process two view triangulation
     data = process_two_video(
@@ -262,23 +212,31 @@ def process(left_path, right_path, out_dir, baseline_m, kpt_vis_save=False):
 @hydra.main(config_path="../configs", config_name="triangulation")
 def main_pt(config):
 
-    input_root = config.paths.input
-    output_root = config.paths.output
+    input_root = Path(config.paths.pt_path)
+    output_root = Path(config.paths.log_path)
     baseline_m = config.baseline_m
-    kpt_vis_save = config.keypoint_vis
 
-    subjects = sorted(glob.glob(f"{input_root}/*/"))
+    subjects = sorted(input_root.glob("*/"))
     if not subjects:
         raise FileNotFoundError(f"No folders found in: {input_root}")
     logger.info(f"Found {len(subjects)} subjects in {input_root}")
-    for person_dir in subjects:
-        person_name = os.path.basename(person_dir.rstrip("/"))
-        logger.info(f"Processing: {person_name}")
-        left = os.path.join(person_dir, "osmo_1.pt")
-        right = os.path.join(person_dir, "osmo_2.pt")
-        out_dir = os.path.join(output_root, person_name)
 
-        process(left, right, out_dir, baseline_m=baseline_m, kpt_vis_save=kpt_vis_save)
+    for person_dir in subjects:
+        person_name = person_dir.name
+        logger.info(f"Processing: {person_name}")
+
+        left_path = person_dir / "osmo_1.pt"
+        right_path = person_dir / "osmo_2.pt"
+
+        out_dir = output_root / person_name
+
+        process(
+            left_path,
+            right_path,
+            out_dir,
+            baseline_m=baseline_m,
+            vis_options=config.visualize,
+        )
 
 
 if __name__ == "__main__":

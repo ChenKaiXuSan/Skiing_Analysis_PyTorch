@@ -64,7 +64,7 @@ def save_3d_joints(
             "joints_3d": joints_3d.tolist(),
             "R": r.tolist(),
             "T": t.tolist(),
-            "video_path": video_path,
+            "video_path": {k: str(v) for k, v in video_path.items()},
         }
         with open(
             os.path.join(save_dir, f"{fname_base}.json"), "w", encoding="utf-8"
