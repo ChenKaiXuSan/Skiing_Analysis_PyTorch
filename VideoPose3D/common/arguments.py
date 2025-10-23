@@ -12,7 +12,7 @@ def parse_args():
 
     # General arguments
     parser.add_argument('-d', '--dataset', default='h36m', type=str, metavar='NAME', help='target dataset') # h36m or humaneva
-    parser.add_argument('-k', '--keypoints', default='cpn_ft_h36m_dbb', type=str, metavar='NAME', help='2D detections to use')
+    parser.add_argument('-k', '--keypoints', default='myvideos', type=str, metavar='NAME', help='2D detections to use')
     parser.add_argument('-str', '--subjects-train', default='S1,S5,S6,S7,S8', type=str, metavar='LIST',
                         help='training subjects separated by comma')
     parser.add_argument('-ste', '--subjects-test', default='S9,S11', type=str, metavar='LIST', help='test subjects separated by comma')
@@ -26,7 +26,7 @@ def parse_args():
                         help='create a checkpoint every N epochs')
     parser.add_argument('-r', '--resume', default='', type=str, metavar='FILENAME',
                         help='checkpoint to resume (file name)')
-    parser.add_argument('--evaluate', default='', type=str, metavar='FILENAME', help='checkpoint to evaluate (file name)')
+    parser.add_argument('--evaluate', default='pretrained_h36m_detectron_coco.bin', type=str, metavar='FILENAME', help='checkpoint to evaluate (file name)')
     parser.add_argument('--render', action='store_true', help='visualize a particular video')
     parser.add_argument('--by-subject', action='store_true', help='break down error by subject (on evaluation)')
     parser.add_argument('--export-training-curves', action='store_true', help='save training curves as .png images')
@@ -42,7 +42,7 @@ def parse_args():
                         help='disable train-time flipping')
     parser.add_argument('-no-tta', '--no-test-time-augmentation', dest='test_time_augmentation', action='store_false',
                         help='disable test-time flipping')
-    parser.add_argument('-arc', '--architecture', default='3,3,3', type=str, metavar='LAYERS', help='filter widths separated by comma')
+    parser.add_argument('-arc', '--architecture', default='3,3,3,3,3', type=str, metavar='LAYERS', help='filter widths separated by comma')
     parser.add_argument('--causal', action='store_true', help='use causal convolutions for real-time processing')
     parser.add_argument('-ch', '--channels', default=1024, type=int, metavar='N', help='number of channels in convolution layers')
 

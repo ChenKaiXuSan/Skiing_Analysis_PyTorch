@@ -11,5 +11,8 @@
 		{
 			"path": "/workspace/VideoPose3D"
 		}
+		{
+			"path": "/workspace/vggt"
+		}
 	]
 }

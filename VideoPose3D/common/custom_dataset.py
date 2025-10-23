@@ -7,6 +7,7 @@
 
 import numpy as np
 import torch
+import copy
 from pathlib import Path
 from VideoPose3D.common.skeleton import Skeleton
 from VideoPose3D.common.camera import normalize_screen_coordinates, image_coordinates
@@ -104,7 +105,8 @@ class MocapDataset:
 
 class CustomDataset(MocapDataset):
     def __init__(self, pt_path: Path, remove_static_joints=True):
-        super().__init__(fps=None, skeleton=h36m_skeleton)
+        one_skeleton = copy.deepcopy(h36m_skeleton) # FIXME: 这里加载一个人的骨架，所以在循环中就越来越少了，需要修改才行
+        super().__init__(fps=None, skeleton=one_skeleton)
 
         # TODO: 这里从pt文件加载
         pt_data = torch.load(pt_path)
@@ -120,6 +122,8 @@ class CustomDataset(MocapDataset):
         cam["translation"] = cam["translation"] / 1000  # mm to meters
 
         cam["id"] = video_name
+        self.video_name = video_name
+        self.video_path = pt_data['video_path']
 
         H, W = pt_data["img_shape"]
         cam["res_w"] = W
@@ -127,7 +131,7 @@ class CustomDataset(MocapDataset):
 
         self._cameras[video_name] = [cam]
 
-        self._data[video_name] = {"custom": {"cameras": cam}}
+        self._data[video_name] = {"custom": {"cameras": cam, "detectron2": pt_data["detectron2"]}}
 
         if remove_static_joints:
             # Bring the skeleton to 17 joints instead of the original 32
@@ -141,3 +145,9 @@ class CustomDataset(MocapDataset):
 
     def supports_semi_supervised(self):
         return False
+    
+    def get_video_name(self):
+        return self.video_name
+
+    def get_video_path(self):
+        return self.video_path    
