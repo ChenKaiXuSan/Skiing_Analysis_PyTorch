@@ -108,7 +108,7 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    args.render = True 
+    args.render = True
     args.viz_subject = pt_path.stem
     args.viz_action = "custom"
     args.viz_output = str(out_dir)
@@ -219,7 +219,11 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
         print("Selected actions:", action_filter)
 
     cameras_valid, poses_valid, poses_valid_2d = fetch(
-        subjects=subjects_test, action_filter=action_filter, keypoints=keypoints, dataset=dataset, args=args
+        subjects=subjects_test,
+        action_filter=action_filter,
+        keypoints=keypoints,
+        dataset=dataset,
+        args=args,
     )
 
     filter_widths = [int(x) for x in args.architecture.split(",")]
@@ -1078,11 +1082,6 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
             )
             # TODO： 这里生成真是的kpt 3d
             prediction = evaluate(gen, return_predictions=True)
-            if model_traj is not None and ground_truth is None:
-                prediction_traj = evaluate(
-                    gen, return_predictions=True, use_trajectory_model=True
-                )
-                prediction += prediction_traj
 
             # TODO：这里保存生成的kpt 3d
             if args.viz_export is not None:
@@ -1094,37 +1093,21 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
                 )
 
             if args.viz_output is not None:
-                if ground_truth is not None:
-                    # Reapply trajectory
-                    trajectory = ground_truth[:, :1]
-                    ground_truth[:, 1:] += trajectory
-                    prediction += trajectory
 
                 # Invert camera transformation
                 cam = dataset.cameras()[sbj_test][args.viz_camera]
-                if ground_truth is not None:
-                    prediction = camera_to_world(
-                        prediction, R=cam["orientation"], t=cam["translation"]
-                    )
-                    ground_truth = camera_to_world(
-                        ground_truth, R=cam["orientation"], t=cam["translation"]
-                    )
-                else:
-                    # If the ground truth is not available, take the camera extrinsic params from a random subject.
-                    # They are almost the same, and anyway, we only need this for visualization purposes.
-                    for subject in dataset.cameras():
-                        if "orientation" in dataset.cameras()[subject][args.viz_camera]:
-                            rot = dataset.cameras()[subject][args.viz_camera][
-                                "orientation"
-                            ]
-                            break
-                    prediction = camera_to_world(prediction, R=rot, t=0)
-                    # We don't have the trajectory, but at least we can rebase the height
-                    prediction[:, :, 2] -= np.min(prediction[:, :, 2])
+
+                # If the ground truth is not available, take the camera extrinsic params from a random subject.
+                # They are almost the same, and anyway, we only need this for visualization purposes.
+                for subject in dataset.cameras():
+                    if "orientation" in dataset.cameras()[subject][args.viz_camera]:
+                        rot = dataset.cameras()[subject][args.viz_camera]["orientation"]
+                        break
+                prediction = camera_to_world(prediction, R=rot, t=0)
+                # We don't have the trajectory, but at least we can rebase the height
+                prediction[:, :, 2] -= np.min(prediction[:, :, 2])
 
                 anim_output = {"Reconstruction": prediction}
-                if ground_truth is not None and not args.viz_no_ground_truth:
-                    anim_output["Ground truth"] = ground_truth
 
                 # TODO: 这里把2d的kpt转成图像坐标系下的
                 input_keypoints = image_coordinates(
@@ -1137,9 +1120,9 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
 
                 _ipt_video_path = dataset.get_video_path()
                 render_animation(
-                    input_keypoints,
+                    input_keypoints,  # 2d kpt
                     keypoints_metadata,
-                    anim_output,
+                    anim_output,  # 3d kpt
                     dataset.skeleton(),
                     dataset.fps(),
                     args.viz_bitrate,
@@ -1153,110 +1136,7 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
                     input_video_skip=args.viz_skip,
                 )
 
-    else:
-        print("Evaluating...")
-        all_actions = {}
-        all_actions_by_subject = {}
-        for subject in subjects_test:
-            if subject not in all_actions_by_subject:
-                all_actions_by_subject[subject] = {}
-
-            for action in dataset[subject].keys():
-                action_name = action.split(" ")[0]
-                if action_name not in all_actions:
-                    all_actions[action_name] = []
-                if action_name not in all_actions_by_subject[subject]:
-                    all_actions_by_subject[subject][action_name] = []
-                all_actions[action_name].append((subject, action))
-                all_actions_by_subject[subject][action_name].append((subject, action))
-
-        def fetch_actions(actions):
-            out_poses_3d = []
-            out_poses_2d = []
-
-            for subject, action in actions:
-                poses_2d = keypoints[subject][action]
-                for i in range(len(poses_2d)):  # Iterate across cameras
-                    out_poses_2d.append(poses_2d[i])
-
-                poses_3d = dataset[subject][action]["positions_3d"]
-                assert len(poses_3d) == len(poses_2d), "Camera count mismatch"
-                for i in range(len(poses_3d)):  # Iterate across cameras
-                    out_poses_3d.append(poses_3d[i])
-
-            stride = args.downsample
-            if stride > 1:
-                # Downsample as requested
-                for i in range(len(out_poses_2d)):
-                    out_poses_2d[i] = out_poses_2d[i][::stride]
-                    if out_poses_3d is not None:
-                        out_poses_3d[i] = out_poses_3d[i][::stride]
-
-            return out_poses_3d, out_poses_2d
-
-        def run_evaluation(actions, action_filter=None):
-            errors_p1 = []
-            errors_p2 = []
-            errors_p3 = []
-            errors_vel = []
-
-            for action_key in actions.keys():
-                if action_filter is not None:
-                    found = False
-                    for a in action_filter:
-                        if action_key.startswith(a):
-                            found = True
-                            break
-                    if not found:
-                        continue
-
-                poses_act, poses_2d_act = fetch_actions(actions[action_key])
-                gen = UnchunkedGenerator(
-                    None,
-                    poses_act,
-                    poses_2d_act,
-                    pad=pad,
-                    causal_shift=causal_shift,
-                    augment=args.test_time_augmentation,
-                    kps_left=kps_left,
-                    kps_right=kps_right,
-                    joints_left=joints_left,
-                    joints_right=joints_right,
-                )
-                e1, e2, e3, ev = evaluate(gen, action_key)
-                errors_p1.append(e1)
-                errors_p2.append(e2)
-                errors_p3.append(e3)
-                errors_vel.append(ev)
-
-            print(
-                "Protocol #1   (MPJPE) action-wise average:",
-                round(np.mean(errors_p1), 1),
-                "mm",
-            )
-            print(
-                "Protocol #2 (P-MPJPE) action-wise average:",
-                round(np.mean(errors_p2), 1),
-                "mm",
-            )
-            print(
-                "Protocol #3 (N-MPJPE) action-wise average:",
-                round(np.mean(errors_p3), 1),
-                "mm",
-            )
-            print(
-                "Velocity      (MPJVE) action-wise average:",
-                round(np.mean(errors_vel), 2),
-                "mm",
-            )
-
-        if not args.by_subject:
-            run_evaluation(all_actions, action_filter)
-        else:
-            for subject in all_actions_by_subject.keys():
-                print("Evaluating on subject", subject)
-                run_evaluation(all_actions_by_subject[subject], action_filter)
-                print("")
-
     # Clean up
     del dataset
+
+    return prediction

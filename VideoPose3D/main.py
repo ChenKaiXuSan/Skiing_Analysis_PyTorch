@@ -28,40 +28,6 @@ from triangulation.vis.frame_visualization import (
 from triangulation.save import save_3d_joints
 from triangulation.triangulate import process_triangulate
 
-K = np.array(
-    [
-        1116.9289548941917,
-        0.0,
-        955.77175993563799,
-        0.0,
-        1117.3341496962166,
-        538.91061167202145,
-        0.0,
-        0.0,
-        1.0,
-    ]
-).reshape(3, 3)
-
-# K_dist = np.array([0.17697328, -0.45675065, -0.0026601, -0.00330938, 0.35538705])
-K_dist = np.array(
-    [
-        -1.1940477842823853,
-        -15.440461757486913,
-        0.00013163161053023783,
-        0.00019082529328353381,
-        98.843073622415901,
-        -1.3588290520381034,
-        -14.555841222727574,
-        96.219667412855202,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    ]
-)
-
 
 def process_video_3d(
     config: DictConfig,

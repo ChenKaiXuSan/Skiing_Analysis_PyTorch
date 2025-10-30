@@ -116,7 +116,7 @@ class CustomDataset(MocapDataset):
         self._data = {}
 
         cam = {}
-        cam.update(custom_camera_params)
+        cam.update(custom_camera_params) # TODO：这些东西从哪里来的
         cam["orientation"] = np.array(cam["orientation"], dtype="float32")
         cam["translation"] = np.array(cam["translation"], dtype="float32")
         cam["translation"] = cam["translation"] / 1000  # mm to meters
