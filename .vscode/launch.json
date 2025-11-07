@@ -99,6 +99,17 @@
       "module": "triangulation.main",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
+    },
+    {
+      "name": "vggt_infer",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "vggt.main",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+        
+      ]
     }
   ]
 }

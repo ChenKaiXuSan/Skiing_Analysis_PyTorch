@@ -1,0 +1,48 @@
+# * this method should use python -m to make sure the hydra config is loaded correctly
+# hydra config
+hydra:
+  run:
+    dir: ${paths.log_path}
+  job:
+    chdir: false
+
+# Path
+paths:
+  log_path: logs/vggt/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  pt_path: /workspace/data/pt
+  video_path: /workspace/data/side_raw # this is raw data path, with left and right side view.
+
+# Model
+model:
+  ckpt_path: /workspace/code/ckpt/pretrained_h36m_detectron_coco.bin
+
+visualize:
+  save_video: true
+  plot_3d: true
+  plot_2d: true
+  plot_skeleton: true
+  plot_skeleton_3d: true
+
+infer:
+  mode: "uniform"              # "uniform" | "every_k" | "fps"
+  fps: 1.0
+  every_k: null
+  uniform_frames: 30
+  max_frames: null
+  max_long_edge: 1024
+  conf_thres: 50.0
+  prediction_mode: "Depthmap and Camera Branch"
+  keep_frames: true
+  export_ply: true
+  voxel_size: 0.0
+  random_sample: null
+
+runtime:
+  skip_if_exists: true
+  verbose: true
+  dry_run: false
+
+dataset:
+  recursive: false
+  patterns: ["*.mp4", "*.mov", "*.MP4"]
+  subject_filter: []   # ["person01", "person07"] 之类；空=全量
