@@ -151,7 +151,6 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
     joints_left, joints_right = list(dataset.skeleton().joints_left()), list(
         dataset.skeleton().joints_right()
     )
-    # keypoints = keypoints["positions_2d"].item()
 
     keypoints = {}
     for k, v in dataset._data.items():
@@ -280,7 +279,7 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
         model_pos = model_pos.cuda()
         model_pos_train = model_pos_train.cuda()
 
-    if args.resume or args.evaluate:
+    if args.evaluate:
         # TODO: 这里加载预训练模型
         chk_filename = config.model.ckpt_path
         print("Loading checkpoint", chk_filename)
@@ -1114,9 +1113,9 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
                     input_keypoints[..., :2], w=cam["res_w"], h=cam["res_h"]
                 )
 
-                from VideoPose3D.common.visualization import render_animation
+                from VideoPose3D.visualization import render_animation
 
-                _opt_path = args.viz_output + sbj_test + ".gif"
+                _opt_path = args.viz_output + ".gif"
 
                 _ipt_video_path = dataset.get_video_path()
                 render_animation(
@@ -1136,7 +1135,9 @@ def run_video_pose_3d(config: DictConfig, pt_path: Path, out_dir: Path, args):
                     input_video_skip=args.viz_skip,
                 )
 
+    depth = dataset.get_depth()
+
     # Clean up
     del dataset
 
-    return prediction
+    return prediction, depth

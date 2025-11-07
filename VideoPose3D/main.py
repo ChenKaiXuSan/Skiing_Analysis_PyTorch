@@ -13,20 +13,21 @@ import numpy as np
 import hydra
 import logging
 from pathlib import Path
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 logger = logging.getLogger(__name__)
+
 # videopose 3d
 from VideoPose3D.run import run_video_pose_3d
 from VideoPose3D.common.arguments import parse_args
 
+# fuse two view 3d poses
+from VideoPose3D.fuse.fuse import fuse_pose_no_extrinsics_h36m
+from VideoPose3D.fuse.fuse_eval import eval_fused_pose
 
-from triangulation.vis.frame_visualization import (
-    draw_and_save_keypoints_from_frame,
-)
+from VideoPose3D.visualization import save_coco3d_gif_multi_view
 
-from triangulation.save import save_3d_joints
-from triangulation.triangulate import process_triangulate
+from VideoPose3D.save import save_3d_joints
 
 
 def process_video_3d(
@@ -34,14 +35,13 @@ def process_video_3d(
     left_path: Path,
     right_path: Path,
     out_dir: Path,
-    vis_options: DictConfig,
 ):
     # FIXME: 这里只是为了合并代码，改好了之后就删除掉
     args = parse_args()
     print(args)
 
-    # process single video
-    run_video_pose_3d(
+    # * run videopose3d for left and right view
+    left_kpt_3d, left_depth = run_video_pose_3d(
         args=args,
         config=config,
         pt_path=left_path,
@@ -49,13 +49,55 @@ def process_video_3d(
     )
     logger.info(f"Saved VideoPose3D results to: {out_dir / 'videopose3d' / 'left'}")
 
-    run_video_pose_3d(
+    right_kpt_3d, right_depth = run_video_pose_3d(
         args=args,
         config=config,
         pt_path=right_path,
         out_dir=out_dir / "videopose3d" / "right",
     )
     logger.info(f"Saved VideoPose3D results to: {out_dir / 'videopose3d' / 'right'}")
+
+    # * fuse two view 3d poses
+    all_fused = []
+    for f in range(left_kpt_3d.shape[0]):
+        left_kpt_3d_f = left_kpt_3d[f]
+        right_kpt_3d_f = right_kpt_3d[f]
+
+        fused_3d, diag = fuse_pose_no_extrinsics_h36m(
+            left_3d=left_kpt_3d_f,
+            right_3d=right_kpt_3d_f,
+            tau=0.06,
+            allow_scale=False,
+            mirror_right_x=True,
+        )
+        all_fused.append(fused_3d)
+
+        if diag is not None:
+            print("mean gain:", diag["mean_gain"], "bad frames:", diag["bad_frames"][:10])
+
+    save_coco3d_gif_multi_view(all_fused, out_dir / "fused", fps=30, swap_yz=False)
+    logger.info(f"Saved fused GIF to: {out_dir / 'fused_pose.gif'}")
+
+    # * save fused 3d joints as npz
+    save_3d_joints(
+        fused_joints_3d=np.array(all_fused),
+        left_joints_3d=left_kpt_3d,
+        right_joints_3d=right_kpt_3d,
+        save_dir=out_dir / "fused" / "fused_joints.npy",
+    )
+
+    # * evaluate fused pose
+    metrics = eval_fused_pose(left_kpt_3d, right_kpt_3d, np.array(all_fused))
+    logger.info("Fused Pose Evaluation Metrics:")
+    for k, v in metrics.items():
+        logger.info(f"  {k:25s}: {v:.4f}")
+
+    # * write metrics to a text file
+    with open(out_dir / "fused_metrics.txt", "w") as f:
+        f.write("Fused Pose Evaluation Metrics:\n")
+        for k, v in metrics.items():
+            f.write(f"{k:25s}: {v:.4f}\n")
+
 
 # ---------- 多人批量处理入口 ----------
 @hydra.main(config_path="../configs", config_name="videopose3d")
@@ -83,7 +125,6 @@ def main_pt(config):
             left_path=left_path,
             right_path=right_path,
             out_dir=out_dir,
-            vis_options=config.visualize,
         )
 
 

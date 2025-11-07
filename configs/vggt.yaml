@@ -24,7 +24,7 @@ visualize:
   plot_skeleton_3d: true
 
 infer:
-  mode: "uniform"              # "uniform" | "every_k" | "fps"
+  mode: "uniform" # "uniform" | "every_k" | "fps"
   fps: 1.0
   every_k: null
   uniform_frames: 30
@@ -36,6 +36,7 @@ infer:
   export_ply: true
   voxel_size: 0.0
   random_sample: null
+  gpu: 1
 
 runtime:
   skip_if_exists: true
@@ -45,4 +46,4 @@ runtime:
 dataset:
   recursive: false
   patterns: ["*.mp4", "*.mov", "*.MP4"]
-  subject_filter: []   # ["person01", "person07"] 之类；空=全量
+  subject_filter: [] # ["person01", "person07"] 之类；空=全量

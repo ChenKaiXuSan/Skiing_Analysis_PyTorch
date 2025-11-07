@@ -88,6 +88,7 @@ def process_one_video(
     voxel_size = float(infer.get("voxel_size", 0.0))
     random_sample = infer.get("random_sample", None)
     verbose = bool(cfg.runtime.get("verbose", True))
+    gpu = infer.get("gpu", 0)
 
     logger.info(f"[Run] {video_path} → {out_dir} | mode={mode}")
 
@@ -108,7 +109,9 @@ def process_one_video(
             prediction_mode=prediction_mode,
             keep_frames=keep_frames,
             verbose=verbose,
+            gpu=gpu,
         )
+        
         logger.info(
             f"[OK] {video_path.name} | frames={result['n_frames']} | "
             f"npz={Path(result['npz_path']).name} | glb={Path(result['glb_path']).name} | "

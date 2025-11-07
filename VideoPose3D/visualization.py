@@ -9,80 +9,61 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, writers
-from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
-import subprocess as sp
 
+import io
+import imageio
 
-def get_resolution(filename):
-    command = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=width,height",
-        "-of",
-        "csv=p=0",
-        filename,
-    ]
-    with sp.Popen(command, stdout=sp.PIPE, bufsize=-1) as pipe:
-        for line in pipe.stdout:
-            w, h = line.decode().strip().split(",")
-            return int(w), int(h)
+import cv2
 
-
-def get_fps(filename):
-    command = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=r_frame_rate",
-        "-of",
-        "csv=p=0",
-        filename,
-    ]
-    with sp.Popen(command, stdout=sp.PIPE, bufsize=-1) as pipe:
-        for line in pipe.stdout:
-            a, b = line.decode().strip().split("/")
-            return int(a) / int(b)
+H36M17_EDGES = [
+    (0, 1),
+    (1, 2),
+    (2, 3),  # Hip->RLeg
+    (0, 4),
+    (4, 5),
+    (5, 6),  # Hip->LLeg
+    (0, 7),
+    (7, 8),
+    (8, 9),
+    (9, 10),  # Spine->Head
+    (8, 11),
+    (11, 12),
+    (12, 13),  # Thorax->LArm
+    (8, 14),
+    (14, 15),
+    (15, 16),  # Thorax->RArm
+]
 
 
 def read_video(filename, skip=0, limit=-1):
-    w, h = get_resolution(filename)
 
-    command = [
-        "ffmpeg",
-        "-i",
-        filename,
-        "-f",
-        "image2pipe",
-        "-pix_fmt",
-        "rgb24",
-        "-vsync",
-        "0",
-        "-vcodec",
-        "rawvideo",
-        "-",
-    ]
+    while True:
+        try:
+            cv2_cap = cv2.VideoCapture(filename)
+            if not cv2_cap.isOpened():
+                raise IOError(f"Cannot open video: {filename}")
+            fps = cv2_cap.get(cv2.CAP_PROP_FPS)
+            break
+        except Exception as e:
+            print(f"Error opening video {filename}: {e}. Retrying...")
 
-    i = 0
-    with sp.Popen(command, stdout=sp.PIPE, bufsize=-1) as pipe:
-        while True:
-            data = pipe.stdout.read(w * h * 3)
-            if not data:
-                break
-            i += 1
-            if i > limit and limit != -1:
-                continue
-            if i > skip:
-                yield np.frombuffer(data, dtype="uint8").reshape((h, w, 3))
+    frames = []
+    frame_idx = 0
+    while True:
+        ret, frame = cv2_cap.read()
+        if not ret:
+            break
+        if frame_idx >= skip:
+            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        frame_idx += 1
+        if limit != -1 and len(frames) >= limit:
+            break
+    cv2_cap.release()
+    return frames, fps
 
 
 def downsample_tensor(X, factor):
@@ -91,7 +72,7 @@ def downsample_tensor(X, factor):
 
 
 def render_animation(
-    keypoints, # 2d kpt (N, J, 2)
+    keypoints,  # 2d kpt (N, J, 2)
     keypoints_metadata,
     poses,
     skeleton,
@@ -155,18 +136,13 @@ def render_animation(
         )
     else:
         # Load video using ffmpeg
-        all_frames = []
-        for f in read_video(input_video_path, skip=input_video_skip, limit=limit):
-            all_frames.append(f)
+        all_frames, fps = read_video(input_video_path, skip=input_video_skip)
         effective_length = min(keypoints.shape[0], len(all_frames))
         all_frames = all_frames[:effective_length]
 
         keypoints = keypoints[input_video_skip:]  # todo remove
         for idx in range(len(poses)):
             poses[idx] = poses[idx][input_video_skip:]
-
-        if fps is None:
-            fps = get_fps(input_video_path)
 
     if downsample > 1:
         keypoints = downsample_tensor(keypoints, downsample)
@@ -293,3 +269,74 @@ def render_animation(
     else:
         raise ValueError("Unsupported output format (only .mp4 and .gif are supported)")
     plt.close()
+
+
+def set_equal_aspect_3d(ax, X, Y, Z):
+    xs, ys, zs = np.array(X), np.array(Y), np.array(Z)
+    max_range = np.array(
+        [xs.max() - xs.min(), ys.max() - ys.min(), zs.max() - zs.min()]
+    ).max()
+    mid_x = (xs.max() + xs.min()) / 2
+    mid_y = (ys.max() + ys.min()) / 2
+    mid_z = (zs.max() + zs.min()) / 2
+    r = max_range / 2 * 1.05
+    ax.set_xlim(mid_x - r, mid_x + r)
+    ax.set_ylim(mid_y - r, mid_y + r)
+    ax.set_zlim(mid_z - r, mid_z + r)
+
+
+def plot_coco3d_frame(points, swap_yz=True, show_labels=False, elev=20, azim=0):
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111, projection="3d")
+
+    x = points[:, 0]
+    y = points[:, 2] if swap_yz else points[:, 1]
+    z = points[:, 1] if swap_yz else points[:, 2]
+
+    ax.scatter(x, y, z, s=20, color="k")
+    for a, b in H36M17_EDGES:
+        ax.plot([x[a], x[b]], [y[a], y[b]], [z[a], z[b]], c="blue", lw=2)
+    if show_labels:
+        for i, (xi, yi, zi) in enumerate(zip(x, y, z)):
+            ax.text(xi, yi, zi, f"{i}", color="red", fontsize=7)
+
+    ax.set_xlabel("X")
+    ax.set_ylabel("Z" if swap_yz else "Y")
+    ax.set_zlabel("Y" if swap_yz else "Z")
+    ax.view_init(elev=elev, azim=azim)
+    set_equal_aspect_3d(ax, x, y, z)
+    plt.tight_layout()
+    return fig
+
+
+def save_coco3d_gif_multi_view(
+    all_fused, gif_prefix: Path = "fused_pose", swap_yz=True, fps=10
+):
+
+    gif_prefix.mkdir(parents=True, exist_ok=True)
+
+    views = [
+        dict(name="front", elev=0, azim=0),
+        dict(name="left", elev=90, azim=-90),
+        dict(name="top", elev=0, azim=90),
+        dict(name="default", elev=20, azim=45),
+    ]
+    for view in views:
+        frames = []
+        for i, f in enumerate(all_fused):
+            fig = plot_coco3d_frame(
+                f,
+                swap_yz=swap_yz,
+                show_labels=False,
+                elev=view["elev"],
+                azim=view["azim"],
+            )
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png")
+            plt.close(fig)
+            buf.seek(0)
+            frames.append(imageio.v2.imread(buf))
+            buf.close()
+        gif_path = gif_prefix / f"{view['name']}.gif"
+        imageio.mimsave(gif_path, frames, fps=fps, loop=0)
+        print(f"✅ Saved {gif_path}")

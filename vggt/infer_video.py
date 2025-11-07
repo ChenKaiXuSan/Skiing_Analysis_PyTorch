@@ -13,8 +13,6 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from typing import List, Dict, Optional
-import traceback
-import matplotlib.pyplot as plt
 
 # 依赖 VGGT 官方模块
 from vggt.visual_util import predictions_to_glb
@@ -23,8 +21,15 @@ from vggt.vggt.utils.load_fn import load_and_preprocess_images
 from vggt.vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from vggt.vggt.utils.geometry import unproject_depth_map_to_point_map
 
+from vggt.camera_vis import (
+    plot_cameras_matplotlib,
+    plot_cameras_timeline,
+)
+
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 # ==========================
 # 工具函数
@@ -41,14 +46,17 @@ def _resize_keep_aspect(img, max_long_edge=None):
     return img
 
 
-def extract_frames(video_path: str, out_dir: str,
-                   mode: str = "uniform",
-                   fps: float = 1.0,
-                   every_k: int = None,
-                   uniform_frames: int = None,
-                   max_frames: int = None,
-                   max_long_edge: int = None,
-                   verbose: bool = False) -> List[str]:
+def extract_frames(
+    video_path: str,
+    out_dir: str,
+    mode: str = "uniform",
+    fps: float = 1.0,
+    every_k: int = None,
+    uniform_frames: int = None,
+    max_frames: int = None,
+    max_long_edge: int = None,
+    verbose: bool = False,
+) -> List[str]:
     """按指定策略抽帧"""
     os.makedirs(out_dir, exist_ok=True)
     vs = cv2.VideoCapture(video_path)
@@ -89,17 +97,23 @@ def load_vggt_model(device="cuda", verbose=True):
     """加载预训练 VGGT 模型"""
     model = VGGT()
     url = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    state = torch.hub.load_state_dict_from_url(url, map_location="cpu", progress=verbose)
+    state = torch.hub.load_state_dict_from_url(
+        url, map_location="cpu", progress=verbose
+    )
     model.load_state_dict(state)
     model.eval().to(device)
     return model
 
 
 @torch.no_grad()
-def run_vggt(images: List[str], model, device="cuda", verbose=True) -> Dict[str, np.ndarray]:
+def run_vggt(
+    images: List[str], model, device="cuda", verbose=True
+) -> Dict[str, np.ndarray]:
     """对图像列表执行 VGGT 推理"""
     imgs = load_and_preprocess_images(images).to(device)
-    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    dtype = (
+        torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    )
     with torch.cuda.amp.autocast(dtype=dtype):
         preds = model(imgs)
 
@@ -109,9 +123,10 @@ def run_vggt(images: List[str], model, device="cuda", verbose=True) -> Dict[str,
     preds["intrinsic"] = intrinsic
 
     # 转 numpy
-    out = {k: (v.detach().cpu().numpy().squeeze(0)
-               if isinstance(v, torch.Tensor) else v)
-           for k, v in preds.items()}
+    out = {
+        k: (v.detach().cpu().numpy().squeeze(0) if isinstance(v, torch.Tensor) else v)
+        for k, v in preds.items()
+    }
     out["pose_enc_list"] = None
     depth = out["depth"]
     out["world_points_from_depth"] = unproject_depth_map_to_point_map(
@@ -129,99 +144,6 @@ def save_ply(points: np.ndarray, path: str):
         for p in points:
             f.write(f"{p[0]} {p[1]} {p[2]}\n")
 
-def plot_cameras_matplotlib(preds,
-                            out_dir=".",
-                            axis_len=0.1,
-                            title="Camera Poses",
-                            show_id=True,
-                            include_points=False):
-    """
-    可视化相机位置并保存三个视角的图片（正视、俯视、侧视）
-    ------------------------------------------------------------
-    Args:
-        preds: dict，包含 "extrinsic" (S,3,4) 或 (S,4,4)
-        out_dir: 输出文件夹路径
-        axis_len: 每个相机坐标轴的长度
-        title: 图标题
-        show_id: 是否显示相机编号
-        include_points: 是否绘制世界点云 (preds["world_points_from_depth"])
-    """
-    os.makedirs(out_dir, exist_ok=True)
-
-    E = preds["extrinsic"]
-    if E.shape[-2:] == (3, 4):
-        R = E[..., :3, :3]
-        t = E[..., :3, 3]
-    else:
-        R = E[..., :3, :3]
-        t = E[..., :3, 3]
-
-    # 相机中心（世界坐标系）
-    C = -np.einsum("sij,sj->si", R.transpose(0, 2, 1), t)
-
-    # 世界点云（可选）
-    if include_points and "world_points_from_depth" in preds:
-        pts = preds["world_points_from_depth"].reshape(-1, 3)
-        mask = np.isfinite(pts).all(axis=1)
-        pts = pts[mask]
-    else:
-        pts = None
-
-    def _plot_one(ax, elev, azim, view_name):
-        ax.cla()
-        ax.scatter(C[:, 0], C[:, 1], C[:, 2], s=20, c="tab:blue", label="Cameras")
-
-        # 绘制相机坐标轴
-        Xw = np.einsum("sij,j->si", R.transpose(0, 2, 1), np.array([1, 0, 0]))
-        Yw = np.einsum("sij,j->si", R.transpose(0, 2, 1), np.array([0, 1, 0]))
-        Zw = np.einsum("sij,j->si", R.transpose(0, 2, 1), np.array([0, 0, 1]))
-
-        for i in range(C.shape[0]):
-            o = C[i]
-            ax.plot([o[0], o[0] + axis_len * Xw[i, 0]],
-                    [o[1], o[1] + axis_len * Xw[i, 1]],
-                    [o[2], o[2] + axis_len * Xw[i, 2]], 'r', lw=1)
-            ax.plot([o[0], o[0] + axis_len * Yw[i, 0]],
-                    [o[1], o[1] + axis_len * Yw[i, 1]],
-                    [o[2], o[2] + axis_len * Yw[i, 2]], 'g', lw=1)
-            ax.plot([o[0], o[0] + axis_len * Zw[i, 0]],
-                    [o[1], o[1] + axis_len * Zw[i, 1]],
-                    [o[2], o[2] + axis_len * Zw[i, 2]], 'b', lw=1)
-            if show_id:
-                ax.text(o[0], o[1], o[2],
-                        f"{i}", color="black", fontsize=9,
-                        ha='center', va='bottom', weight='bold')
-
-        if pts is not None:
-            ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2],
-                       s=1, c="gray", alpha=0.3, label="Points")
-
-        ax.set_title(f"{title} ({view_name})")
-        ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
-        ax.legend(loc="upper right", fontsize=7)
-        ax.set_box_aspect((1, 1, 1))
-        ax.view_init(elev=elev, azim=azim)
-
-    # 创建画布
-    fig = plt.figure(figsize=(7, 7))
-    ax = fig.add_subplot(111, projection="3d")
-
-    # === 视角配置 ===
-    views = [
-        dict(name="default", elev=30, azim=60, bg="#ffffff"),
-        dict(name="front", elev=0, azim=90, bg="#f0f7ff"),
-        dict(name="top", elev=90, azim=-90, bg="#fff8f0"),
-        dict(name="side", elev=0, azim=0, bg="#f8fff0"),
-    ]
-
-    for view in views:
-        _plot_one(ax, view["elev"], view["azim"], view["name"])
-        out_path = os.path.join(out_dir, f"cameras_{view['name']}.png")
-        plt.tight_layout()
-        plt.savefig(out_path, dpi=200)
-        print(f"[Saved] {out_path}")
-
-    plt.close()
 
 # ==========================
 # 主函数接口
@@ -242,6 +164,7 @@ def reconstruct_from_video(
     prediction_mode: str = "Depthmap and Camera Branch",
     keep_frames: bool = True,
     verbose: bool = True,
+    gpu: int = 0,
 ) -> Dict[str, str]:
     """
     从视频执行 VGGT 重建。
@@ -255,8 +178,8 @@ def reconstruct_from_video(
         }
     """
     t0 = time.time()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if device != "cuda":
+    device = f"cuda:{gpu}" if torch.cuda.is_available() else "cpu"
+    if "cuda" not in device:
         raise RuntimeError("VGGT 需要 GPU。")
 
     img_dir = os.path.join(outdir, "images")
@@ -264,9 +187,15 @@ def reconstruct_from_video(
 
     # 1. 抽帧
     imgs = extract_frames(
-        video_path, img_dir,
-        mode=mode, fps=fps, every_k=every_k, uniform_frames=uniform_frames,
-        max_frames=max_frames, max_long_edge=max_long_edge, verbose=verbose
+        video_path,
+        img_dir,
+        mode=mode,
+        fps=fps,
+        every_k=every_k,
+        uniform_frames=uniform_frames,
+        max_frames=max_frames,
+        max_long_edge=max_long_edge,
+        verbose=verbose,
     )
 
     # 2. 加载模型
@@ -276,61 +205,43 @@ def reconstruct_from_video(
     preds = run_vggt(imgs, model, device, verbose=verbose)
 
     # * draw camera frustums (optional)
-    cam_png = os.path.join(outdir, "camera_poses")
-    plot_cameras_matplotlib(preds, out_dir=cam_png, axis_len=0.1, title="Estimated Camera Poses")
+    plot_cameras_matplotlib(
+        preds,
+        out_dir=os.path.join(outdir, "camera_poses"),
+        axis_len=0.1,
+        title="Estimated Camera Poses",
+    )
+
+    plot_cameras_timeline(
+        preds,
+        out_path=os.path.join(outdir, "camera_poses/cameras_timeline_x.png"),
+        dx=1,
+        timeline_axis="x",
+        wrap=len(imgs),
+        axis_len=10,
+    )
 
     # 4. 保存 npz
     npz_path = os.path.join(outdir, "predictions.npz")
     np.savez(npz_path, **preds)
 
     # 5. 导出 glb
-    glb_path = os.path.join(outdir, f"scene_conf{conf_thres}_mode{prediction_mode.replace(' ', '_')}.glb")
+    glb_path = os.path.join(
+        outdir, f"scene_conf{conf_thres}_mode{prediction_mode.replace(' ', '_')}.glb"
+    )
     glb = predictions_to_glb(
-        preds, conf_thres=conf_thres, filter_by_frames="All",
-        show_cam=True, mask_black_bg=False, mask_white_bg=False,
-        mask_sky=False, target_dir=outdir, prediction_mode=prediction_mode
+        preds,
+        conf_thres=conf_thres,
+        filter_by_frames="All",
+        show_cam=True,
+        mask_black_bg=False,
+        mask_white_bg=False,
+        mask_sky=False,
+        target_dir=outdir,
+        prediction_mode=prediction_mode,
     )
     glb.export(file_obj=glb_path)
     print(f"Saved GLB → {glb_path}")
-
-    # 5.1 保存 PNG 预览
-    try:
-        preview_path = os.path.join(outdir, "scene_preview.png")
-
-        try:
-            # 优先使用 trimesh 的 pyglet 渲染
-            png_bytes = glb.save_image(resolution=(1024, 768), visible=True)
-            with open(preview_path, "wb") as f:
-                f.write(png_bytes)
-            print(f"[Info] Saved GLB preview → {preview_path}")
-        
-        except Exception as inner_e:
-            # 如果 pyglet 不可用，自动退回到 matplotlib 绘制
-            print(f"[Warning] pyglet backend failed ({inner_e}), using matplotlib fallback.")
-            import matplotlib.pyplot as plt
-            from mpl_toolkits.mplot3d import Axes3D
-
-            pts = preds["world_points_from_depth"].reshape(-1, 3)
-            mask = np.isfinite(pts).all(axis=1)
-            pts = pts[mask]
-            if pts.shape[0] > 200000:
-                # 避免点太多渲染太慢
-                idx = np.random.choice(len(pts), 200000, replace=False)
-                pts = pts[idx]
-
-            fig = plt.figure(figsize=(8, 8))
-            ax = fig.add_subplot(111, projection='3d')
-            ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=0.5, c='blue', alpha=0.4)
-            ax.set_title("VGGT 3D Reconstruction Preview")
-            ax.set_axis_off()
-            plt.tight_layout()
-            plt.savefig(preview_path, dpi=200)
-            plt.close(fig)
-            logger.info(f"Saved fallback preview → {preview_path}")
-
-    except Exception as e:
-        logger.warning(f"Failed to save PNG preview: {e}")
-        traceback.print_exc()
 
     # 6. 导出 ply（可选）
     ply_path = None
@@ -352,5 +263,5 @@ def reconstruct_from_video(
         glb_path=glb_path,
         ply_path=ply_path,
         n_frames=len(imgs),
-        time=time.time() - t0
+        time=time.time() - t0,
     )

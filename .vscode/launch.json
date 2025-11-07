@@ -40,51 +40,6 @@
       "console": "integratedTerminal"
     },
     {
-      "name": "prepare_data_2d_custom",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "VideoPose3D.data.prepare_data_2d_custom",
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "args": []
-    },
-    {
-      "name": "run_custom",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "VideoPose3D.main",
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      // "args": [
-      //   "-d",
-      //   // "custom",
-      //   "/workspace/data/pt/run_3/osmo_1.pt",
-      //   "-k",
-      //   "myvideos",
-      //   "-arc",
-      //   "3,3,3,3,3",
-      //   "-c",
-      //   "/workspace/code/ckpt",
-      //   "--evaluate",
-      //   "pretrained_h36m_detectron_coco.bin",
-      //   "--render",
-      //   "--viz-subject",
-      //   "osmo_1",
-      //   "--viz-action",
-      //   "custom",
-      //   "--viz-camera",
-      //   "0",
-      //   "--viz-video",
-      //   "/workspace/VideoPose3D/input_directory/osmo_2.mp4",
-      //   "--viz-output",
-      //   "/workspace/code/logs/videopose3d/",
-      //   "--viz-export",
-      //   "/workspace/code/logs/videopose3d",
-      //   "--viz-size",
-      //   "6"
-      // ]
-    },
-    {
       "name": "camera_calibration",
       "type": "debugpy",
       "request": "launch",
@@ -107,9 +62,7 @@
       "module": "vggt.main",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "args": [
-        
-      ]
+      "args": []
     }
   ]
 }

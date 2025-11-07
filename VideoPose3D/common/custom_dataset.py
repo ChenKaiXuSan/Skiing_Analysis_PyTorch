@@ -105,7 +105,9 @@ class MocapDataset:
 
 class CustomDataset(MocapDataset):
     def __init__(self, pt_path: Path, remove_static_joints=True):
-        one_skeleton = copy.deepcopy(h36m_skeleton) # FIXME: 这里加载一个人的骨架，所以在循环中就越来越少了，需要修改才行
+        one_skeleton = copy.deepcopy(
+            h36m_skeleton
+        )  # 这里加载一个人的骨架，所以在循环中就越来越少了，需要copy一份
         super().__init__(fps=None, skeleton=one_skeleton)
 
         # TODO: 这里从pt文件加载
@@ -116,14 +118,14 @@ class CustomDataset(MocapDataset):
         self._data = {}
 
         cam = {}
-        cam.update(custom_camera_params) # TODO：这些东西从哪里来的
+        cam.update(custom_camera_params)  # TODO：这些东西从哪里来的
         cam["orientation"] = np.array(cam["orientation"], dtype="float32")
         cam["translation"] = np.array(cam["translation"], dtype="float32")
         cam["translation"] = cam["translation"] / 1000  # mm to meters
 
         cam["id"] = video_name
         self.video_name = video_name
-        self.video_path = pt_data['video_path']
+        self.video_path = pt_data["video_path"]
 
         H, W = pt_data["img_shape"]
         cam["res_w"] = W
@@ -131,7 +133,13 @@ class CustomDataset(MocapDataset):
 
         self._cameras[video_name] = [cam]
 
-        self._data[video_name] = {"custom": {"cameras": cam, "detectron2": pt_data["detectron2"]}}
+        self._data[video_name] = {
+            "custom": {
+                "cameras": cam,
+                "detectron2": pt_data["detectron2"],
+                "depth": pt_data["depth"].squeeze(),
+            }
+        }
 
         if remove_static_joints:
             # Bring the skeleton to 17 joints instead of the original 32
@@ -145,9 +153,12 @@ class CustomDataset(MocapDataset):
 
     def supports_semi_supervised(self):
         return False
-    
+
     def get_video_name(self):
         return self.video_name
 
     def get_video_path(self):
-        return self.video_path    
+        return self.video_path
+
+    def get_depth(self):
+        return self._data[self.video_name]["custom"]["depth"]
