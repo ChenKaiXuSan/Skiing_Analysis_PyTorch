@@ -148,6 +148,7 @@ def fuse_pose_no_extrinsics_h36m(
 
         if mirror_right_x:
             Rt[:, 0] *= -1  # 仅镜像X轴，必要时也可镜像Y/Z，取决于你的坐标定义
+            Rt[:, 2 ] *= -1  # flip z axis
 
         # 1) 分别规范化（pelvis 原点 + pelvis–neck 归一）
         Lt_n, _ = _center_scale_h36m(Lt)

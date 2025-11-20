@@ -68,7 +68,7 @@ def process_video_3d(
             right_3d=right_kpt_3d_f,
             tau=0.06,
             allow_scale=False,
-            mirror_right_x=True,
+            mirror_right_x=False,
         )
         all_fused.append(fused_3d)
 

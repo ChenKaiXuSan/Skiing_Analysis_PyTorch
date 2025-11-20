@@ -41,7 +41,8 @@ infer:
 runtime:
   skip_if_exists: true
   verbose: true
-  dry_run: false
+  run_multi_view: true
+  run_single_view: true
 
 dataset:
   recursive: false
