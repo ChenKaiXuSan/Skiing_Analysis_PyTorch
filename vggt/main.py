@@ -11,184 +11,33 @@ import os
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from vggt.single_view_infer import reconstruct_from_video
+from vggt.infer import process_multi_view_video, process_single_view_video
 
-logger = logging.getLogger("vggt.batch")
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
 # Utility
 # --------------------------------------------------------------------------- #
-def find_videos(
+def find_files(
     subject_dir: Path,
-    patterns: Optional[List[str]] = None,
+    patterns: List[str],
     recursive: bool = False,
 ) -> List[Path]:
-    """在 subject_dir 下按模式查找视频文件。"""
-    if not patterns:
-        patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
-
-    videos: List[Path] = []
+    """在 subject_dir 下按模式查找文件（视频或 pt）。"""
+    files: List[Path] = []
     if recursive:
         for pat in patterns:
-            videos.extend(subject_dir.rglob(pat))
+            files.extend(subject_dir.rglob(pat))
     else:
         for pat in patterns:
-            videos.extend(subject_dir.glob(pat))
-
-    # 去重 + 排序
-    vids = sorted({v.resolve() for v in videos})
-    return vids
-
-
-def should_skip(out_dir: Path, skip_if_exists: bool) -> bool:
-    """如果已存在 predictions.npz 和 scene_*.glb 就跳过。"""
-    if not skip_if_exists:
-        return False
-    pred = out_dir / "predictions.npz"
-    glb = next(out_dir.glob("scene_*.glb"), None)
-    return pred.exists() and glb is not None
-
-
-def build_infer_kwargs(cfg: DictConfig) -> Dict:
-    """
-    从 cfg 中构建 reconstruct_from_video 所需的参数字典。
-    统一处理默认值，避免 KeyError + 重复代码。
-    """
-    infer = cfg.get("infer", {})
-
-    return dict(
-        mode=infer.get("mode", "uniform"),  # "uniform" | "every_k" | "fps"
-        fps=float(infer.get("fps", 1.0)),
-        every_k=infer.get("every_k", None),
-        uniform_frames=infer.get("uniform_frames", 60),
-        max_frames=infer.get("max_frames", None),
-        max_long_edge=infer.get("max_long_edge", 1024),
-        conf_thres=float(infer.get("conf_thres", 50.0)),
-        prediction_mode=infer.get("prediction_mode", "Depthmap and Camera Branch"),
-        keep_frames=bool(infer.get("keep_frames", True)),
-        export_ply=bool(infer.get("export_ply", False)),
-        voxel_size=float(infer.get("voxel_size", 0.0)),
-        random_sample=infer.get("random_sample", None),
-        verbose=bool(cfg.runtime.get("verbose", True)),
-        gpu=infer.get("gpu", 0),
-    )
-
-
-# --------------------------------------------------------------------------- #
-# Processing functions
-# --------------------------------------------------------------------------- #
-def process_multi_view_video(
-    left_video_path: Path,
-    right_video_path: Path,
-    out_root: Path,
-    cfg: DictConfig,
-) -> Optional[Path]:
-    """
-    处理双目视频。返回输出目录；失败返回 None。
-
-    目前示例代码仍然只对 left_video_path 进行 VGGT 推理，
-    主要提供一个“成对管理 + 输出目录区分”的框架。
-    后续如果需要真正 multi-view 融合，可以在这里扩展。
-    """
-    subject = left_video_path.parent.name or "default"
-    video_stem_left = left_video_path.stem
-    video_stem_right = right_video_path.stem
-
-    out_dir = out_root / subject / f"{video_stem_left}_and_{video_stem_right}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    if should_skip(out_dir, cfg.runtime.skip_if_exists):
-        logger.info(
-            f"[Skip] {left_video_path.name} & {right_video_path.name} 结果已存在，跳过。"
-        )
-        return out_dir
-
-    infer_kwargs = build_infer_kwargs(cfg)
-    dry_run = bool(cfg.runtime.get("dry_run", False))
-
-    logger.info(
-        f"[Run-MV] {left_video_path} & {right_video_path} → {out_dir} | "
-        f"mode={infer_kwargs['mode']}, fps={infer_kwargs['fps']}"
-    )
-
-    if dry_run:
-        logger.info("[Dry-Run] 仅列出任务，不实际运行 VGGT。")
-        return out_dir
-
-    try:
-        # TODO: 如果将来需要真正双目融合，可在这里扩展传参方式
-        result = reconstruct_from_video(
-            video_path=str(left_video_path),
-            outdir=str(out_dir),
-            **infer_kwargs,
-        )
-
-        logger.info(
-            f"[OK-MV] {left_video_path.name} & {right_video_path.name} | "
-            f"frames={result.get('n_frames', 'NA')} | "
-            f"npz={Path(result['npz_path']).name if 'npz_path' in result else 'NA'} | "
-            f"glb={Path(result['glb_path']).name if 'glb_path' in result else 'NA'} | "
-            f"time={result.get('time', 0.0):.2f}s"
-        )
-        return out_dir
-    except Exception as e:
-        logger.exception(f"[Failed-MV] {left_video_path} & {right_video_path} | {e}")
-        return None
-
-
-def process_single_view_video(
-    video_path: Path,
-    out_root: Path,
-    cfg: DictConfig,
-) -> Optional[Path]:
-    """
-    处理单个视频。返回输出目录；失败返回 None。
-    输出目录结构：out_root/<subject>/<video_stem>/
-    """
-    subject = video_path.parent.name or "default"
-    video_stem = video_path.stem
-    out_dir = out_root / subject / video_stem
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    if should_skip(out_dir, cfg.runtime.skip_if_exists):
-        logger.info(f"[Skip] {video_path.name} 结果已存在，跳过。")
-        return out_dir
-
-    infer_kwargs = build_infer_kwargs(cfg)
-    dry_run = bool(cfg.runtime.get("dry_run", False))
-
-    logger.info(
-        f"[Run-SV] {video_path} → {out_dir} | "
-        f"mode={infer_kwargs['mode']}, fps={infer_kwargs['fps']}"
-    )
-
-    if dry_run:
-        logger.info("[Dry-Run] 仅列出任务，不实际运行 VGGT。")
-        return out_dir
-
-    try:
-        result = reconstruct_from_video(
-            video_path=str(video_path),
-            outdir=str(out_dir),
-            **infer_kwargs,
-        )
-
-        logger.info(
-            f"[OK-SV] {video_path.name} | "
-            f"frames={result.get('n_frames', 'NA')} | "
-            f"npz={Path(result['npz_path']).name if 'npz_path' in result else 'NA'} | "
-            f"glb={Path(result['glb_path']).name if 'glb_path' in result else 'NA'} | "
-            f"time={result.get('time', 0.0):.2f}s"
-        )
-        return out_dir
-    except Exception as e:
-        logger.exception(f"[Failed-SV] {video_path} | {e}")
-        return None
+            files.extend(subject_dir.glob(pat))
+    return sorted({f.resolve() for f in files})
 
 
 # --------------------------------------------------------------------------- #
@@ -206,84 +55,200 @@ def main(cfg: DictConfig) -> None:
 
     logger.info("==== Config ====\n" + OmegaConf.to_yaml(cfg))
 
+    # 读取路径
     video_root = Path(cfg.paths.video_path).resolve()
+    pt_root = Path(cfg.paths.pt_path).resolve()
     out_root = Path(cfg.paths.log_path).resolve()
+
     if not video_root.exists():
         raise FileNotFoundError(f"video_path not found: {video_root}")
+    if not pt_root.exists():
+        raise FileNotFoundError(f"pt_path not found: {pt_root}")
+
     out_root.mkdir(parents=True, exist_ok=True)
 
-    # 1) 列出 subjects
-    subjects = sorted([p for p in video_root.iterdir() if p.is_dir()])
-    if cfg.dataset.get("subject_filter"):
-        allow = set(cfg.dataset.subject_filter)
-        subjects = [s for s in subjects if s.name in allow]
-    if not subjects:
+    recursive = bool(cfg.dataset.get("recursive", False))
+    subject_filter = set(cfg.dataset.get("subject_filter", []))
+
+    # 并发线程数（可以在 cfg.runtime.num_workers 里改）
+    num_workers = int(cfg.runtime.get("num_workers", 4))
+
+    # 搜索 patterns
+    vid_patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
+    pt_patterns = ["*.pt"]
+
+    # ---------------------------------------------------------------------- #
+    # 扫描 video_root
+    # ---------------------------------------------------------------------- #
+    subjects_video = sorted([p for p in video_root.iterdir() if p.is_dir()])
+    if subject_filter:
+        subjects_video = [p for p in subjects_video if p.name in subject_filter]
+
+    if not subjects_video:
         raise FileNotFoundError(f"No subject folders under: {video_root}")
 
-    logger.info(f"Found {len(subjects)} subjects in {video_root}")
+    logger.info(f"Found {len(subjects_video)} subjects in: {video_root}")
 
-    recursive = bool(cfg.dataset.get("recursive", False))
-    patterns = cfg.dataset.get("patterns")
+    # { subject_name: [video files] }
+    videos_map: Dict[str, List[Path]] = {}
+    for subject_dir in subjects_video:
+        vids = find_files(subject_dir, vid_patterns, recursive)
+        if vids:
+            videos_map[subject_dir.name] = vids
+        else:
+            logger.warning(f"[No video] {subject_dir}")
 
-    # multi-view pair: (subject_name, left_path, right_path)
-    multi_pairs: List[Tuple[str, Path, Path]] = []
-    # 所有视频（用于单视角处理，可根据 config 决定是否启用）
-    all_videos: List[Path] = []
+    # ---------------------------------------------------------------------- #
+    # 扫描 pt_root
+    # ---------------------------------------------------------------------- #
+    subjects_pt = sorted([p for p in pt_root.iterdir() if p.is_dir()])
+    if subject_filter:
+        subjects_pt = [p for p in subjects_pt if p.name in subject_filter]
 
-    for subject_dir in subjects:
-        vids = find_videos(subject_dir, patterns=patterns, recursive=recursive)
-        if not vids:
-            logger.info(f"[No video] {subject_dir}")
-            continue
+    if not subjects_pt:
+        raise FileNotFoundError(f"No subject folders under: {pt_root}")
 
-        vids = sorted(vids)
-        all_videos.extend(vids)
+    logger.info(f"Found {len(subjects_pt)} subjects in: {pt_root}")
 
-        if len(vids) >= 2:
-            # 这里简单取前两个作为左右视角，如有命名规范可在此改成更智能的匹配
-            multi_pairs.append((subject_dir.name, vids[0], vids[1]))
-        elif len(vids) == 1:
-            logger.warning(
-                f"[Single video] {subject_dir} 仅发现 1 个视频，将只参与单视角处理。"
-            )
+    # { subject_name: [pt files] }
+    pts_map: Dict[str, List[Path]] = {}
+    for subject_dir in subjects_pt:
+        pts = find_files(subject_dir, pt_patterns, recursive)
+        if pts:
+            pts_map[subject_dir.name] = pts
+        else:
+            logger.warning(f"[No pt] {subject_dir}")
+
+    # ---------------------------------------------------------------------- #
+    # 构建 multi-view & single-view 任务
+    # ---------------------------------------------------------------------- #
+    multi_pairs: List[Tuple[str, Path, Path, Path, Path]] = []
+    single_jobs: List[Tuple[Path, Path]] = []
+
+    logger.info("Matching video & pt for each subject...")
+
+    subjects = sorted(set(videos_map.keys()) & set(pts_map.keys()))
+    if not subjects:
+        raise ValueError("没有任何 subject 同时包含 video 与 pt 文件")
+
+    for subject_name in subjects:
+        vids = videos_map[subject_name]
+        pts = pts_map[subject_name]
+
+        # 多视角：至少 2 个 video + 2 个 pt
+        if len(vids) >= 2 and len(pts) >= 2:
+            multi_pairs.append((subject_name, vids[0], vids[1], pts[0], pts[1]))
+            
+            extra = list(zip(vids, pts))
+            single_jobs.extend(extra)
+        else:
+            # 只有单视角
+            logger.warning(f"[Single view only] {subject_name}")
+            single_jobs.extend(zip(vids, pts))
+
+    logger.info(f"Total matched subjects: {len(subjects)}")
+    logger.info(f"Total multi-view pairs: {len(multi_pairs)}")
+    logger.info(f"Total single-view jobs: {len(single_jobs)}")
 
     run_multi_view = bool(cfg.runtime.get("run_multi_view", True))
     run_single_view = bool(cfg.runtime.get("run_single_view", True))
 
-    # 2) 处理多视角
-    if run_multi_view and multi_pairs:
-        logger.info(f"Total {len(multi_pairs)} multi-view video pairs to process.")
-        ok_mv, fail_mv = 0, 0
-        for subject_name, left_v, right_v in multi_pairs:
-            out_dir = process_multi_view_video(left_v, right_v, out_root, cfg)
-            if out_dir is None:
-                fail_mv += 1
-            else:
-                ok_mv += 1
-        logger.info(
-            f"== Multi-View Done | OK: {ok_mv} | Failed: {fail_mv} "
-            f"| Total: {ok_mv + fail_mv} =="
-        )
-    else:
-        logger.info("Skip multi-view processing (run_multi_view=False or no pairs).")
+    # ---------------------------------------------------------------------- #
+    # 构造统一任务列表：multi + single 一起丢进线程池
+    # ---------------------------------------------------------------------- #
+    jobs = []
 
-    # 3) 处理单视角
-    if run_single_view and all_videos:
-        logger.info(f"Total {len(all_videos)} single-view videos to process.")
-        ok_sv, fail_sv = 0, 0
-        for video_path in all_videos:
-            out_dir = process_single_view_video(video_path, out_root, cfg)
-            if out_dir is None:
-                fail_sv += 1
-            else:
-                ok_sv += 1
+    if run_multi_view:
+        for pair in multi_pairs:
+            subject_name, left_v, right_v, left_pt, right_pt = pair
+            jobs.append(
+                (
+                    "multi",
+                    dict(
+                        subject_name=subject_name,
+                        left_v=left_v,
+                        right_v=right_v,
+                        left_pt=left_pt,
+                        right_pt=right_pt,
+                    ),
+                )
+            )
 
-        logger.info(
-            f"== Single-View Done | OK: {ok_sv} | Failed: {fail_sv} "
-            f"| Total: {ok_sv + fail_sv} =="
-        )
-    else:
-        logger.info("Skip single-view processing (run_single_view=False or no videos).")
+    if run_single_view:
+        for v, p in single_jobs:
+            jobs.append(("single", dict(video=v, pt=p)))
+
+    if not jobs:
+        logger.info("No jobs to run (multi_view / single_view disabled or empty).")
+        logger.info("==== ALL DONE ====")
+        return
+
+    logger.info(
+        f"Submitting {len(jobs)} jobs "
+        f"({sum(1 for j in jobs if j[0]=='multi')} multi-view, "
+        f"{sum(1 for j in jobs if j[0]=='single')} single-view) "
+        f"with {num_workers} threads..."
+    )
+
+    ok_mv = fail_mv = ok_sv = fail_sv = 0
+
+    def _run_job(job):
+        job_type, payload = job
+        if job_type == "multi":
+            subject_name = payload["subject_name"]
+            left_v = payload["left_v"]
+            right_v = payload["right_v"]
+            left_pt = payload["left_pt"]
+            right_pt = payload["right_pt"]
+            logger.info(f"[Subject: {subject_name}] Multi-view START")
+            out_dir = process_multi_view_video(
+                left_video_path=left_v,
+                left_pt_path=left_pt,
+                right_video_path=right_v,
+                right_pt_path=right_pt,
+                out_root=out_root,
+                cfg=cfg,
+            )
+            return job_type, subject_name, left_v, out_dir
+        else:  # "single"
+            v = payload["video"]
+            p = payload["pt"]
+            logger.info(f"[Single-view] {v.name} START")
+            out_dir = process_single_view_video(
+                video_path=v,
+                pt_path=p,
+                out_root=out_root,
+                cfg=cfg,
+            )
+            return job_type, v.name, v, out_dir
+
+    # 统一线程池：multi + single 一起并行
+    with ThreadPoolExecutor(max_workers=num_workers) as ex:
+        future_to_job = {ex.submit(_run_job, job): job for job in jobs}
+        for future in as_completed(future_to_job):
+            job_type, name, v_or_left, out_dir = future.result()
+            if job_type == "multi":
+                if out_dir is None:
+                    fail_mv += 1
+                    logger.error(f"[Subject: {name}] Multi-view FAILED")
+                else:
+                    ok_mv += 1
+                    logger.info(f"[Subject: {name}] Multi-view OK")
+            else:
+                if out_dir is None:
+                    fail_sv += 1
+                    logger.error(f"[Single-view] {name} FAILED")
+                else:
+                    ok_sv += 1
+                    logger.info(f"[Single-view] {name} OK")
+
+    logger.info(
+        f"== Multi-View Summary | OK: {ok_mv} | Failed: {fail_mv} | Total: {ok_mv + fail_mv} =="
+    )
+    logger.info(
+        f"== Single-View Summary | OK: {ok_sv} | Failed: {fail_sv} | Total: {ok_sv + fail_sv} =="
+    )
+    logger.info("==== ALL DONE ====")
 
 
 if __name__ == "__main__":

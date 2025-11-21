@@ -11,24 +11,12 @@
       "name": "prepare_dataset",
       "type": "debugpy",
       "request": "launch",
-      "module": "prepare_dataset.main copy",
+      "module": "prepare_dataset.main",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "args": [
         "device=1",
         "task=[depth, optical_flow, yolo, detectron2]",
-      ]
-    },
-    {
-      "name": "prepare_dataset_crop",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "prepare_dataset.main_crop",
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "args": [
-        // "task=[optical_flow,depth]",
-        "task=[bbox]"
       ]
     },
     {
@@ -62,7 +50,9 @@
       "module": "vggt.main",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "args": []
+      "args": [
+        "runtime.run_multi_view=true",
+      ]
     }
   ]
 }

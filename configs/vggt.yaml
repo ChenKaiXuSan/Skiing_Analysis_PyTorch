@@ -8,9 +8,9 @@ hydra:
 
 # Path
 paths:
-  log_path: logs/vggt/${now:%Y-%m-%d}/${now:%H-%M-%S}
   pt_path: /workspace/data/pt
   video_path: /workspace/data/side_raw # this is raw data path, with left and right side view.
+  log_path: logs/vggt/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 # Model
 model:
@@ -24,12 +24,6 @@ visualize:
   plot_skeleton_3d: true
 
 infer:
-  mode: "uniform" # "uniform" | "every_k" | "fps"
-  fps: 1.0
-  every_k: null
-  uniform_frames: 30
-  max_frames: null
-  max_long_edge: 1024
   conf_thres: 50.0
   prediction_mode: "Depthmap and Camera Branch"
   keep_frames: true
@@ -39,12 +33,10 @@ infer:
   gpu: 1
 
 runtime:
-  skip_if_exists: true
   verbose: true
   run_multi_view: true
   run_single_view: true
+  num_workers: 4
 
 dataset:
   recursive: false
-  patterns: ["*.mp4", "*.mov", "*.MP4"]
-  subject_filter: [] # ["person01", "person07"] 之类；空=全量

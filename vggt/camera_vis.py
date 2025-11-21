@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-'''
+"""
 File: /workspace/code/vggt/camera_vis.py
 Project: /workspace/code/vggt
 Created Date: Friday November 7th 2025
@@ -18,10 +18,12 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
-'''
+"""
+
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+
 
 def plot_cameras_matplotlib(
     preds,
@@ -32,8 +34,8 @@ def plot_cameras_matplotlib(
     include_points=False,
 ):
     """
-    可视化相机位置并保存三个视角的图片（正视、俯视、侧视）
-    ------------------------------------------------------------
+    可视化相机位置，并把多个视角绘制在同一张图片中（多子图）。
+
     Args:
         preds: dict，包含 "extrinsic" (S,3,4) 或 (S,4,4)
         out_dir: 输出文件夹路径
@@ -45,12 +47,9 @@ def plot_cameras_matplotlib(
     os.makedirs(out_dir, exist_ok=True)
 
     E = preds["extrinsic"]
-    if E.shape[-2:] == (3, 4):
-        R = E[..., :3, :3]
-        t = E[..., :3, 3]
-    else:
-        R = E[..., :3, :3]
-        t = E[..., :3, 3]
+    # 支持 (S,3,4) 或 (S,4,4)
+    R = E[..., :3, :3]
+    t = E[..., :3, 3]
 
     # 相机中心（世界坐标系）
     C = -np.einsum("sij,sj->si", R.transpose(0, 2, 1), t)
@@ -63,11 +62,25 @@ def plot_cameras_matplotlib(
     else:
         pts = None
 
-    def _plot_one(ax, elev, azim, view_name):
-        ax.cla()
-        ax.scatter(C[:, 0], C[:, 1], C[:, 2], s=20, c="tab:blue", label="Cameras")
+    # === 视角配置 ===
+    views = [
+        dict(name="default", elev=30, azim=60),
+        dict(name="front", elev=0, azim=90),
+        dict(name="top", elev=90, azim=-90),
+        dict(name="side", elev=0, azim=0),
+    ]
+    n_views = len(views)
 
-        # 绘制相机坐标轴
+    # 子图布局：2x2
+    n_cols = 2
+    n_rows = (n_views + n_cols - 1) // n_cols
+
+    fig = plt.figure(figsize=(4 * n_cols, 4 * n_rows))
+
+    def _plot_one(ax, elev, azim, view_name):
+        ax.scatter(C[:, 0], C[:, 1], C[:, 2], s=20, label="Cameras")
+
+        # 相机坐标轴（在世界坐标系下的方向）
         Xw = np.einsum("sij,j->si", R.transpose(0, 2, 1), np.array([1, 0, 0]))
         Yw = np.einsum("sij,j->si", R.transpose(0, 2, 1), np.array([0, 1, 0]))
         Zw = np.einsum("sij,j->si", R.transpose(0, 2, 1), np.array([0, 0, 1]))
@@ -119,7 +132,7 @@ def plot_cameras_matplotlib(
                 label="Points",
             )
 
-        ax.set_title(f"{title} ({view_name})")
+        ax.set_title(f"{view_name}")
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
@@ -127,37 +140,32 @@ def plot_cameras_matplotlib(
         ax.set_box_aspect((1, 1, 1))
         ax.view_init(elev=elev, azim=azim)
 
-    # 创建画布
-    fig = plt.figure(figsize=(7, 7))
-    ax = fig.add_subplot(111, projection="3d")
-
-    # === 视角配置 ===
-    views = [
-        dict(name="default", elev=30, azim=60, bg="#ffffff"),
-        dict(name="front", elev=0, azim=90, bg="#f0f7ff"),
-        dict(name="top", elev=90, azim=-90, bg="#fff8f0"),
-        dict(name="side", elev=0, azim=0, bg="#f8fff0"),
-    ]
-
-    for view in views:
+    # 绘制每个视角到不同 subplot
+    for idx, view in enumerate(views):
+        row = idx // n_cols
+        col = idx % n_cols
+        ax = fig.add_subplot(n_rows, n_cols, idx + 1, projection="3d")
         _plot_one(ax, view["elev"], view["azim"], view["name"])
-        out_path = os.path.join(out_dir, f"cameras_{view['name']}.png")
-        plt.tight_layout()
-        plt.savefig(out_path, dpi=200)
-        print(f"[Saved] {out_path}")
 
+    fig.suptitle(title)
+    plt.tight_layout()
+    out_path = os.path.join(out_dir, "cameras_all_views.png")
+    plt.savefig(out_path, dpi=200)
+    print(f"[Saved] {out_path}")
     plt.close()
+
 
 def plot_cameras_timeline(
     preds,
     out_path="./vis_cameras/cameras_timeline.png",
     axis_len=1,
-    dx=0.2,                 # 每一帧沿时间轴的平移步长
-    timeline_axis="x",      # "x" | "y" | "z"
-    stride=1,               # 下采样：每隔多少帧绘制一次
-    wrap=None,              # 每行最多放多少帧；None=不换行
+    dx=0.2,  # 每一帧沿时间轴的平移步长
+    timeline_axis="x",  # "x" | "y" | "z"
+    stride=1,  # 下采样：每隔多少帧绘制一次
+    wrap=None,  # 每行最多放多少帧；None=不换行
     show_id=True,
-    elev=25, azim=-60,      # 视角
+    elev=25,
+    azim=-60,  # 视角
 ):
     """
     将每一帧相机按时间在指定轴方向平移（t * dx），生成“时间走廊”效果。
@@ -177,9 +185,9 @@ def plot_cameras_timeline(
     # ---- 解析外参，得到相机中心与旋转 ----
     E = preds["extrinsic"]
     if E.shape[-2:] == (3, 4):
-        R = E[..., :3, :3]   # (T,3,3)
-        t = E[..., :3, 3]    # (T,3)
-    else:                    # (T,4,4)
+        R = E[..., :3, :3]  # (T,3,3)
+        t = E[..., :3, 3]  # (T,3)
+    else:  # (T,4,4)
         R = E[..., :3, :3]
         t = E[..., :3, 3]
     T = R.shape[0]
@@ -195,9 +203,11 @@ def plot_cameras_timeline(
         idxs = np.array([0])
 
     # 时间轴单位向量
-    axis_map = {"x": np.array([1.0, 0.0, 0.0]),
-                "y": np.array([0.0, 1.0, 0.0]),
-                "z": np.array([0.0, 0.0, 1.0])}
+    axis_map = {
+        "x": np.array([1.0, 0.0, 0.0]),
+        "y": np.array([0.0, 1.0, 0.0]),
+        "z": np.array([0.0, 0.0, 1.0]),
+    }
     if timeline_axis not in axis_map:
         raise ValueError("timeline_axis must be one of {'x','y','z'}")
     a = axis_map[timeline_axis]
@@ -225,7 +235,7 @@ def plot_cameras_timeline(
     C_shift_list = []
     Xw_list, Yw_list, Zw_list = [], [], []
     for i, t_idx in enumerate(idxs):
-        o = time_offset(i)                 # (3,)
+        o = time_offset(i)  # (3,)
         C_shift_list.append(C[t_idx] + o)  # 平移后的中心
         # 将相机局部轴变换到世界：R^T * ex/ey/ez
         Rt = R[t_idx].T
@@ -233,8 +243,8 @@ def plot_cameras_timeline(
         Yw_list.append(Rt @ np.array([0.0, 1.0, 0.0]))
         Zw_list.append(Rt @ np.array([0.0, 0.0, 1.0]))
 
-    C_shift = np.stack(C_shift_list, axis=0)           # (N,3)
-    Xw = np.stack(Xw_list, axis=0)                     # (N,3)
+    C_shift = np.stack(C_shift_list, axis=0)  # (N,3)
+    Xw = np.stack(Xw_list, axis=0)  # (N,3)
     Yw = np.stack(Yw_list, axis=0)
     Zw = np.stack(Zw_list, axis=0)
 
@@ -259,32 +269,71 @@ def plot_cameras_timeline(
     ax.set_xlim(xyz_min[0], xyz_max[0])
     # ax.set_ylim(xyz_min[1], xyz_max[1])
     ax.set_zlim(xyz_min[2], xyz_max[2])
-    ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
-    ax.set_title(f"Cameras laid along time on {timeline_axis.upper()} (dx={dx}, stride={stride}, wrap={wrap})")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    ax.set_title(
+        f"Cameras laid along time on {timeline_axis.upper()} (dx={dx}, stride={stride}, wrap={wrap})"
+    )
 
     # 画相机中心与时间轨迹（按顺序连线）
-    ax.plot(C_shift[:, 0], C_shift[:, 1], C_shift[:, 2], color="royalblue", lw=1.5, label="timeline path")
-    ax.scatter(C_shift[:, 0], C_shift[:, 1], C_shift[:, 2], c="crimson", s=15, label="cam centers")
+    ax.plot(
+        C_shift[:, 0],
+        C_shift[:, 1],
+        C_shift[:, 2],
+        color="royalblue",
+        lw=1.5,
+        label="timeline path",
+    )
+    ax.scatter(
+        C_shift[:, 0],
+        C_shift[:, 1],
+        C_shift[:, 2],
+        c="crimson",
+        s=15,
+        label="cam centers",
+    )
 
     # 画每个相机的局部坐标轴（短线）
     for i in range(C_shift.shape[0]):
         o = C_shift[i]
-        ax.plot([o[0], o[0] + axis_len * Xw[i, 0]],
-                [o[1], o[1] + axis_len * Xw[i, 1]],
-                [o[2], o[2] + axis_len * Xw[i, 2]], "r", lw=1)
-        ax.plot([o[0], o[0] + axis_len * Yw[i, 0]],
-                [o[1], o[1] + axis_len * Yw[i, 1]],
-                [o[2], o[2] + axis_len * Yw[i, 2]], "g", lw=1)
-        ax.plot([o[0], o[0] + axis_len * Zw[i, 0]],
-                [o[1], o[1] + axis_len * Zw[i, 1]],
-                [o[2], o[2] + axis_len * Zw[i, 2]], "b", lw=1)
+        ax.plot(
+            [o[0], o[0] + axis_len * Xw[i, 0]],
+            [o[1], o[1] + axis_len * Xw[i, 1]],
+            [o[2], o[2] + axis_len * Xw[i, 2]],
+            "r",
+            lw=1,
+        )
+        ax.plot(
+            [o[0], o[0] + axis_len * Yw[i, 0]],
+            [o[1], o[1] + axis_len * Yw[i, 1]],
+            [o[2], o[2] + axis_len * Yw[i, 2]],
+            "g",
+            lw=1,
+        )
+        ax.plot(
+            [o[0], o[0] + axis_len * Zw[i, 0]],
+            [o[1], o[1] + axis_len * Zw[i, 1]],
+            [o[2], o[2] + axis_len * Zw[i, 2]],
+            "b",
+            lw=1,
+        )
         if show_id:
-            ax.text(o[0], o[1], o[2], f"{idxs[i]}", color="k", fontsize=8,
-                    ha="center", va="bottom", weight="bold")
+            ax.text(
+                o[0],
+                o[1],
+                o[2],
+                f"{idxs[i]}",
+                color="k",
+                fontsize=8,
+                ha="center",
+                va="bottom",
+                weight="bold",
+            )
 
     ax.legend(loc="upper right", fontsize=8)
     ax.view_init(elev=0, azim=90)  # 默认视角
-    
+
     plt.tight_layout()
     plt.savefig(out_path, dpi=220)
     plt.close(fig)

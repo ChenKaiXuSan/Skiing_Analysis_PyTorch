@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-'''
+"""
 File: /workspace/code/vggt/single_view_infer copy.py
 Project: /workspace/code/vggt
 Created Date: Thursday November 20th 2025
@@ -18,7 +18,8 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
-'''
+"""
+
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 """
@@ -27,20 +28,25 @@ vggt_video_infer.py
 """
 
 import os
-import cv2
 import time
 import shutil
 import numpy as np
 import torch
 from tqdm import tqdm
 from typing import List, Dict, Optional
+from omegaconf import DictConfig, OmegaConf
+from pathlib import Path
+
+from torchvision.io import write_png
 
 # 依赖 VGGT 官方模块
 from vggt.visual_util import predictions_to_glb
 from vggt.vggt.models.vggt import VGGT
-from vggt.vggt.utils.load_fn import load_and_preprocess_images
+
 from vggt.vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from vggt.vggt.utils.geometry import unproject_depth_map_to_point_map
+
+from vggt.load import load_info, load_and_preprocess_images
 
 from vggt.camera_vis import (
     plot_cameras_matplotlib,
@@ -55,63 +61,6 @@ logger = logging.getLogger(__name__)
 # ==========================
 # 工具函数
 # ==========================
-def _resize_keep_aspect(img, max_long_edge=None):
-    if not max_long_edge:
-        return img
-    h, w = img.shape[:2]
-    m = max(h, w)
-    if m > max_long_edge:
-        scale = max_long_edge / float(m)
-        nh, nw = int(h * scale), int(w * scale)
-        img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
-    return img
-
-
-def extract_frames(
-    video_path: str,
-    out_dir: str,
-    mode: str = "uniform",
-    fps: float = 1.0,
-    every_k: int = None,
-    uniform_frames: int = None,
-    max_frames: int = None,
-    max_long_edge: int = None,
-    verbose: bool = False,
-) -> List[str]:
-    """按指定策略抽帧"""
-    os.makedirs(out_dir, exist_ok=True)
-    vs = cv2.VideoCapture(video_path)
-    total = int(vs.get(cv2.CAP_PROP_FRAME_COUNT))
-    native_fps = vs.get(cv2.CAP_PROP_FPS) or 30.0
-    out_paths = []
-
-    if verbose:
-        print(f"[Extract] {mode} sampling from {total} frames")
-
-    if mode == "uniform" and uniform_frames:
-        idxs = np.linspace(0, total - 1, num=uniform_frames, dtype=int)
-    elif mode == "every_k" and every_k:
-        idxs = np.arange(0, total, every_k, dtype=int)
-    else:  # fps mode
-        step = max(int(native_fps / max(fps, 1e-6)), 1)
-        idxs = np.arange(0, total, step, dtype=int)
-
-    for i, fidx in enumerate(tqdm(idxs, disable=not verbose, desc="Extracting")):
-        vs.set(cv2.CAP_PROP_POS_FRAMES, int(fidx))
-        ok, frame = vs.read()
-        if not ok:
-            continue
-        frame = _resize_keep_aspect(frame, max_long_edge)
-        out_path = os.path.join(out_dir, f"{i:06d}.png")
-        cv2.imwrite(out_path, frame)
-        out_paths.append(out_path)
-        if max_frames and len(out_paths) >= max_frames:
-            break
-
-    vs.release()
-    if verbose:
-        print(f"Extracted {len(out_paths)} frames → {out_dir}")
-    return out_paths
 
 
 def load_vggt_model(device="cuda", verbose=True):
@@ -128,7 +77,9 @@ def load_vggt_model(device="cuda", verbose=True):
 
 @torch.no_grad()
 def run_vggt(
-    images: List[str], model, device="cuda", verbose=True
+    images: List[str],
+    model,
+    device="cuda",
 ) -> Dict[str, np.ndarray]:
     """对图像列表执行 VGGT 推理"""
     imgs = load_and_preprocess_images(images).to(device)
@@ -169,17 +120,10 @@ def save_ply(points: np.ndarray, path: str):
 # ==========================
 # 主函数接口
 # ==========================
-def reconstruct_from_video(
-    video_path: str,
+def reconstruct_from_frames(
+    imgs: list[torch.Tensor],
     outdir: str,
-    mode: str = "uniform",
-    fps: float = 1.0,
-    every_k: Optional[int] = None,
-    uniform_frames: Optional[int] = None,
-    max_frames: Optional[int] = None,
-    max_long_edge: Optional[int] = None,
     conf_thres: float = 50.0,
-    voxel_size: float = 0.0,
     random_sample: Optional[int] = None,
     export_ply: bool = False,
     prediction_mode: str = "Depthmap and Camera Branch",
@@ -206,24 +150,11 @@ def reconstruct_from_video(
     img_dir = os.path.join(outdir, "images")
     os.makedirs(outdir, exist_ok=True)
 
-    # 1. 抽帧
-    imgs = extract_frames(
-        video_path,
-        img_dir,
-        mode=mode,
-        fps=fps,
-        every_k=every_k,
-        uniform_frames=uniform_frames,
-        max_frames=max_frames,
-        max_long_edge=max_long_edge,
-        verbose=verbose,
-    )
-
     # 2. 加载模型
     model = load_vggt_model(device, verbose=verbose)
 
     # 3. 推理
-    preds = run_vggt(imgs, model, device, verbose=verbose)
+    preds = run_vggt(imgs, model, device)
 
     # * draw camera frustums (optional)
     plot_cameras_matplotlib(
@@ -286,3 +217,136 @@ def reconstruct_from_video(
         n_frames=len(imgs),
         time=time.time() - t0,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Processing functions
+# --------------------------------------------------------------------------- #
+def process_multi_view_video(
+    left_video_path: Path,
+    left_pt_path: Path,
+    right_video_path: Path,
+    right_pt_path: Path,
+    out_root: Path,
+    cfg: DictConfig,
+) -> Optional[Path]:
+    """
+    处理双目视频。返回输出目录；失败返回 None。
+
+    目前示例代码仍然只对 left_video_path 进行 VGGT 推理，
+    主要提供一个“成对管理 + 输出目录区分”的框架。
+    后续如果需要真正 multi-view 融合，可以在这里扩展。
+    """
+    subject = left_video_path.parent.name or "default"
+
+    out_dir = out_root / "multi_view" / subject
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"[Run-MV] {left_video_path} & {right_video_path} → {out_dir} | ")
+
+    # * load info from pt and video
+    *_, left_frames = load_info(
+        video_file_path=left_video_path.as_posix(), pt_file_path=left_pt_path.as_posix()
+    )
+    *_, right_frames = load_info(
+        video_file_path=right_video_path.as_posix(),
+        pt_file_path=right_pt_path.as_posix(),
+    )
+
+    for idx in tqdm(
+        range(0, min(len(left_frames), len(right_frames))), desc="Processing frames"
+    ):
+        # save images
+        img_dir = out_dir / f"frame_{idx:04d}" / "raw_images" 
+        img_dir.mkdir(parents=True, exist_ok=True)
+        write_png(left_frames[idx].permute(2, 0, 1), img_dir / f"left_{idx:04d}.png")
+        write_png(right_frames[idx].permute(2, 0, 1), img_dir / f"right_{idx:04d}.png")
+
+        result = reconstruct_from_frames(
+            imgs=[
+                left_frames[idx],
+                right_frames[idx],
+            ],
+            outdir=str(out_dir) + f"/frame_{idx:04d}",
+            conf_thres=cfg.infer.get("conf_thres", 50.0),
+            prediction_mode=cfg.infer.get(
+                "prediction_mode", "Depthmap and Camera Branch"
+            ),
+            export_ply=cfg.infer.get("export_ply", False),
+            random_sample=cfg.infer.get("random_sample", None),
+            gpu=cfg.infer.get("gpu", 0),
+            verbose=bool(cfg.runtime.get("verbose", True)),
+        )
+
+        logger.info(
+            f"[OK-MV] {left_video_path.name} & {right_video_path.name} | "
+            f"frames={result.get('n_frames', 'NA')} | "
+            f"npz={Path(result['npz_path']).name if 'npz_path' in result else 'NA'} | "
+            f"glb={Path(result['glb_path']).name if 'glb_path' in result else 'NA'} | "
+            f"time={result.get('time', 0.0):.2f}s"
+        )
+
+    return out_dir
+
+
+def process_single_view_video(
+    video_path: Path,
+    pt_path: Path,
+    out_root: Path,
+    cfg: DictConfig,
+) -> Optional[Path]:
+    """
+    处理双目视频。返回输出目录；失败返回 None。
+
+    目前示例代码仍然只对 left_video_path 进行 VGGT 推理，
+    主要提供一个“成对管理 + 输出目录区分”的框架。
+    后续如果需要真正 multi-view 融合，可以在这里扩展。
+    """
+    subject = video_path.parent.name or "default"
+
+    out_dir = out_root / "single_view" / subject / video_path.stem
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"[Run-SV] {video_path} → {out_dir} | ")
+
+    # * load info from pt and video
+    *_, frames = load_info(
+        video_file_path=video_path.as_posix(), pt_file_path=pt_path.as_posix()
+    )
+
+    # * 处理前后3f
+    for idx in tqdm(range(0, len(frames) - 1), desc="Processing frames"):
+        # save images
+        img_dir = out_dir / f"frame_{idx:04d}" / "raw_images" 
+        img_dir.mkdir(parents=True, exist_ok=True)
+        write_png(frames[idx].permute(2, 0, 1), img_dir / f"frame_{idx:04d}.png")
+        write_png(
+            frames[idx + 1].permute(2, 0, 1), img_dir / f"frame_{idx + 1:04d}.png"
+        )
+
+        result = reconstruct_from_frames(
+            imgs=[
+                frames[idx],
+                frames[idx + 1],
+            ],
+            outdir=str(out_dir) + f"/frame_{idx:04d}",
+            conf_thres=cfg.infer.get("conf_thres", 50.0),
+            prediction_mode=cfg.infer.get(
+                "prediction_mode", "Depthmap and Camera Branch"
+            ),
+            keep_frames=cfg.infer.get("keep_frames", True),
+            export_ply=cfg.infer.get("export_ply", False),
+            random_sample=cfg.infer.get("random_sample", None),
+            gpu=cfg.infer.get("gpu", 0),
+            verbose=bool(cfg.runtime.get("verbose", True)),
+        )
+
+        logger.info(
+            f"[OK-SV] {video_path.name} | "
+            f"frames={result.get('n_frames', 'NA')} | "
+            f"npz={Path(result['npz_path']).name if 'npz_path' in result else 'NA'} | "
+            f"glb={Path(result['glb_path']).name if 'glb_path' in result else 'NA'} | "
+            f"time={result.get('time', 0.0):.2f}s"
+        )
+
+    return out_dir
