@@ -72,6 +72,12 @@ def main(cfg: DictConfig) -> None:
 
     # 并发线程数（可以在 cfg.runtime.num_workers 里改）
     num_workers = int(cfg.runtime.get("num_workers", 4))
+    debug_mode = bool(cfg.runtime.get("debug", False)) or os.getenv("VGGT_DEBUG", "0") == "1"
+
+    if debug_mode:
+        logger.info("[Debug] debug_mode=True, 将使用单线程顺序执行，不启用多线程。")
+        num_workers = 1
+
 
     # 搜索 patterns
     vid_patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
@@ -138,7 +144,7 @@ def main(cfg: DictConfig) -> None:
         # 多视角：至少 2 个 video + 2 个 pt
         if len(vids) >= 2 and len(pts) >= 2:
             multi_pairs.append((subject_name, vids[0], vids[1], pts[0], pts[1]))
-            
+
             extra = list(zip(vids, pts))
             single_jobs.extend(extra)
         else:
@@ -185,8 +191,8 @@ def main(cfg: DictConfig) -> None:
 
     logger.info(
         f"Submitting {len(jobs)} jobs "
-        f"({sum(1 for j in jobs if j[0]=='multi')} multi-view, "
-        f"{sum(1 for j in jobs if j[0]=='single')} single-view) "
+        f"({sum(1 for j in jobs if j[0] == 'multi')} multi-view, "
+        f"{sum(1 for j in jobs if j[0] == 'single')} single-view) "
         f"with {num_workers} threads..."
     )
 
@@ -223,10 +229,10 @@ def main(cfg: DictConfig) -> None:
             return job_type, v.name, v, out_dir
 
     # 统一线程池：multi + single 一起并行
-    with ThreadPoolExecutor(max_workers=num_workers) as ex:
-        future_to_job = {ex.submit(_run_job, job): job for job in jobs}
-        for future in as_completed(future_to_job):
-            job_type, name, v_or_left, out_dir = future.result()
+    if debug_mode:
+        # ---------------- 单线程顺序执行（方便下断点调试） ----------------
+        for job in jobs:
+            job_type, name, v_or_left, out_dir = _run_job(job)
             if job_type == "multi":
                 if out_dir is None:
                     fail_mv += 1
@@ -241,6 +247,26 @@ def main(cfg: DictConfig) -> None:
                 else:
                     ok_sv += 1
                     logger.info(f"[Single-view] {name} OK")
+    else:
+        # ---------------- 多线程并行执行（正常运行模式） ----------------
+        with ThreadPoolExecutor(max_workers=num_workers) as ex:
+            future_to_job = {ex.submit(_run_job, job): job for job in jobs}
+            for future in as_completed(future_to_job):
+                job_type, name, v_or_left, out_dir = future.result()
+                if job_type == "multi":
+                    if out_dir is None:
+                        fail_mv += 1
+                        logger.error(f"[Subject: {name}] Multi-view FAILED")
+                    else:
+                        ok_mv += 1
+                        logger.info(f"[Subject: {name}] Multi-view OK")
+                else:
+                    if out_dir is None:
+                        fail_sv += 1
+                        logger.error(f"[Single-view] {name} FAILED")
+                    else:
+                        ok_sv += 1
+                        logger.info(f"[Single-view] {name} OK")
 
     logger.info(
         f"== Multi-View Summary | OK: {ok_mv} | Failed: {fail_mv} | Total: {ok_mv + fail_mv} =="

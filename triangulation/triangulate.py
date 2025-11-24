@@ -19,6 +19,7 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
+
 import os
 import numpy as np
 import cv2
@@ -70,7 +71,6 @@ def triangulate_joints(keypoints1, keypoints2, K, R, T):
 def process_triangulate(
     left_kpts, right_kpts, left_vframes, right_vframes, K, R, T, output_path
 ):
-
     joints_3d_all = []
 
     for l_kpt, r_kpt, l_frame, r_frame, r, t, i in zip(
@@ -103,8 +103,8 @@ def process_triangulate(
             dist1=K_dist,
             K2=K,
             dist2=K_dist,
-            R=r,
-            T=t,  # 注意：T要用“有尺度”的（基线已缩放）
+            R=r,  # （2，3，3），世界》相机
+            T=t,  # （2，3），世界》相机
             joint_names=None,  # 或者传 COCO 的关节名列表
             out_path=os.path.join(output_path, "reproj", f"{i:04d}.jpg"),
         )

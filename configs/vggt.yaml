@@ -37,6 +37,7 @@ runtime:
   run_multi_view: true
   run_single_view: true
   num_workers: 4
+  debug: false
 
 dataset:
   recursive: false

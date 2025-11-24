@@ -48,14 +48,31 @@ from vggt.vggt.utils.geometry import unproject_depth_map_to_point_map
 
 from vggt.load import load_info, load_and_preprocess_images
 
-from vggt.camera_vis import (
+from vggt.vis.vggt_camera_vis import (
+    plot_cameras_from_predictions,
     plot_cameras_matplotlib,
-    plot_cameras_timeline,
 )
+
+from vggt.triangulate import triangulate_one_frame
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+K = np.array(
+    [
+        1116.9289548941917,
+        0.0,
+        955.77175993563799,
+        0.0,
+        1117.3341496962166,
+        538.91061167202145,
+        0.0,
+        0.0,
+        1.0,
+    ]
+).reshape(3, 3)
 
 
 # ==========================
@@ -122,12 +139,11 @@ def save_ply(points: np.ndarray, path: str):
 # ==========================
 def reconstruct_from_frames(
     imgs: list[torch.Tensor],
-    outdir: str,
+    outdir: Path,
     conf_thres: float = 50.0,
     random_sample: Optional[int] = None,
     export_ply: bool = False,
     prediction_mode: str = "Depthmap and Camera Branch",
-    keep_frames: bool = True,
     verbose: bool = True,
     gpu: int = 0,
 ) -> Dict[str, str]:
@@ -147,8 +163,7 @@ def reconstruct_from_frames(
     if "cuda" not in device:
         raise RuntimeError("VGGT 需要 GPU。")
 
-    img_dir = os.path.join(outdir, "images")
-    os.makedirs(outdir, exist_ok=True)
+    outdir.mkdir(parents=True, exist_ok=True)
 
     # 2. 加载模型
     model = load_vggt_model(device, verbose=verbose)
@@ -156,30 +171,29 @@ def reconstruct_from_frames(
     # 3. 推理
     preds = run_vggt(imgs, model, device)
 
-    # * draw camera frustums (optional)
-    plot_cameras_matplotlib(
-        preds,
-        out_dir=os.path.join(outdir, "camera_poses"),
-        axis_len=0.1,
-        title="Estimated Camera Poses",
-    )
+    # * 可视化相机位姿
+    # plot_cameras_matplotlib(
+    #     preds,
+    #     out_dir=outdir / "camera_poses",
+    #     axis_len=0.1,
+    #     title="Estimated Camera Poses",
+    # )
 
-    plot_cameras_timeline(
-        preds,
-        out_path=os.path.join(outdir, "camera_poses/cameras_timeline_x.png"),
-        dx=1,
-        timeline_axis="x",
-        wrap=len(imgs),
-        axis_len=10,
+    plot_cameras_from_predictions(
+        predictions=preds,
+        out_path=outdir / "camera_poses" / "camera_poses.png",
+        axis_len=0.1,
+        include_points=False,  # 想看点云就开
+        center_mode="mean",  # 不以相机为原点，而是整体居中
     )
 
     # 4. 保存 npz
-    npz_path = os.path.join(outdir, "predictions.npz")
+    npz_path = outdir / "predictions.npz"
     np.savez(npz_path, **preds)
 
     # 5. 导出 glb
-    glb_path = os.path.join(
-        outdir, f"scene_conf{conf_thres}_mode{prediction_mode.replace(' ', '_')}.glb"
+    glb_path = (
+        outdir / f"scene_conf{conf_thres}_mode{prediction_mode.replace(' ', '_')}.glb"
     )
     glb = predictions_to_glb(
         preds,
@@ -204,11 +218,8 @@ def reconstruct_from_frames(
         if random_sample and pts.shape[0] > random_sample:
             idx = np.random.choice(len(pts), random_sample, replace=False)
             pts = pts[idx]
-        ply_path = os.path.join(outdir, "pointcloud.ply")
+        ply_path = outdir / "pointcloud.ply"
         save_ply(pts, ply_path)
-
-    if not keep_frames:
-        shutil.rmtree(img_dir, ignore_errors=True)
 
     return dict(
         npz_path=npz_path,
@@ -216,6 +227,7 @@ def reconstruct_from_frames(
         ply_path=ply_path,
         n_frames=len(imgs),
         time=time.time() - t0,
+        preds=preds,
     )
 
 
@@ -245,10 +257,10 @@ def process_multi_view_video(
     logger.info(f"[Run-MV] {left_video_path} & {right_video_path} → {out_dir} | ")
 
     # * load info from pt and video
-    *_, left_frames = load_info(
+    left_kpts, *_, left_frames = load_info(
         video_file_path=left_video_path.as_posix(), pt_file_path=left_pt_path.as_posix()
     )
-    *_, right_frames = load_info(
+    right_kpts, *_, right_frames = load_info(
         video_file_path=right_video_path.as_posix(),
         pt_file_path=right_pt_path.as_posix(),
     )
@@ -257,17 +269,18 @@ def process_multi_view_video(
         range(0, min(len(left_frames), len(right_frames))), desc="Processing frames"
     ):
         # save images
-        img_dir = out_dir / f"frame_{idx:04d}" / "raw_images" 
+        img_dir = out_dir / f"frame_{idx:04d}" / "raw_images"
         img_dir.mkdir(parents=True, exist_ok=True)
         write_png(left_frames[idx].permute(2, 0, 1), img_dir / f"left_{idx:04d}.png")
         write_png(right_frames[idx].permute(2, 0, 1), img_dir / f"right_{idx:04d}.png")
 
+        # infer vggt
         result = reconstruct_from_frames(
             imgs=[
                 left_frames[idx],
                 right_frames[idx],
             ],
-            outdir=str(out_dir) + f"/frame_{idx:04d}",
+            outdir=out_dir / f"frame_{idx:04d}" / "vggt_res",
             conf_thres=cfg.infer.get("conf_thres", 50.0),
             prediction_mode=cfg.infer.get(
                 "prediction_mode", "Depthmap and Camera Branch"
@@ -286,7 +299,49 @@ def process_multi_view_video(
             f"time={result.get('time', 0.0):.2f}s"
         )
 
+        # run triangulation and reprojection
+        # 这里是相机在世界坐标系下的 R,t,C
+        camera_extrinsics = result["preds"]["extrinsic"]
+        camera_intrinsics = result["preds"][
+            "intrinsic"
+        ]  # TODO: 相机内参是被缩放过的，这里还需要修改
+        R, t, C = extrinsic_to_RT(camera_extrinsics)
+
+        joints_3d_all = triangulate_one_frame(
+            kptL=left_kpts[idx],
+            kptR=right_kpts[idx],
+            frame_L=left_frames[idx].numpy(),
+            frame_R=right_frames[idx].numpy(),
+            K=np.stack([K, K], axis=0),
+            R=np.stack([R[0], R[1]], axis=0),
+            T=np.stack([t[0], t[1]], axis=0),
+            save_dir=out_dir / f"frame_{idx:04d}" / "triangulation",
+            dist=None,
+            visualize_3d=True,
+            reproject_check=True,
+        )
+
     return out_dir
+
+
+def extrinsic_to_RT(extrinsic):
+    """
+    extrinsic: (T,3,4) / (T,4,4) / (3,4) / (4,4)
+    return: R (T,3,3), t (T,3), C (T,3)
+    """
+    E = np.asarray(extrinsic)
+
+    # 扩展到 (T,3,4)
+    if E.ndim == 2:  # 单帧
+        E = E[None, ...]
+    if E.shape[-2:] == (4, 4):
+        E = E[:, :3, :]
+
+    R = E[:, :3, :3]  # (T,3,3)
+    t = E[:, :3, 3]  # (T,3)
+    C = -np.einsum("tij,tj->ti", R.transpose(0, 2, 1), t)  # (T,3)
+
+    return R, t, C
 
 
 def process_single_view_video(
@@ -317,7 +372,7 @@ def process_single_view_video(
     # * 处理前后3f
     for idx in tqdm(range(0, len(frames) - 1), desc="Processing frames"):
         # save images
-        img_dir = out_dir / f"frame_{idx:04d}" / "raw_images" 
+        img_dir = out_dir / f"frame_{idx:04d}" / "raw_images"
         img_dir.mkdir(parents=True, exist_ok=True)
         write_png(frames[idx].permute(2, 0, 1), img_dir / f"frame_{idx:04d}.png")
         write_png(
