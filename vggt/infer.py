@@ -1,61 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 """
-File: /workspace/code/vggt/single_view_infer copy.py
-Project: /workspace/code/vggt
-Created Date: Thursday November 20th 2025
-Author: Kaixu Chen
------
-Comment:
-
-Have a good code time :)
------
-Last Modified: Thursday November 20th 2025 5:47:43 pm
-Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
------
-Copyright (c) 2025 The University of Tsukuba
------
-HISTORY:
-Date      	By	Comments
-----------	---	---------------------------------------------------------
-"""
-
-#!/usr/bin/env python3
-# -*- coding:utf-8 -*-
-"""
 vggt_video_infer.py
 从单个视频抽帧并执行 VGGT 推理，可作为函数调用。
 """
 
-import os
-import time
+import cv2
 import shutil
+import logging
 import numpy as np
-import torch
 from tqdm import tqdm
 from typing import List, Dict, Optional
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 
+import torch
 from torchvision.io import write_png
 
 # 依赖 VGGT 官方模块
-from vggt.visual_util import predictions_to_glb
 from vggt.vggt.models.vggt import VGGT
 
 from vggt.vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from vggt.vggt.utils.geometry import unproject_depth_map_to_point_map
 
 from vggt.load import load_info, load_and_preprocess_images
+from vggt.save import save_inference_results, update_pt_with_3d_info
 
-from vggt.vis.vggt_camera_vis import (
-    plot_cameras_from_predictions,
-    plot_cameras_matplotlib,
-)
+from vggt.vis.vggt_camera_vis import plot_cameras_from_predictions
 
 from vggt.triangulate import triangulate_one_frame
 
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +52,36 @@ K = np.array(
 # ==========================
 # 工具函数
 # ==========================
+
+
+def scale_intrinsics(
+    K: np.ndarray, orig_size: tuple[int, int], new_size: tuple[int, int]
+) -> np.ndarray:
+    """
+    当图像从原始分辨率 resize 到新分辨率时，同步缩放相机内参 K。
+
+    K: (3,3) 内参矩阵，像素坐标
+       [[fx, 0, cx],
+        [0, fy, cy],
+        [0,  0,  1]]
+    orig_size: (H, W) 原始图像分辨率
+    new_size:  (H, W) 新图像分辨率
+
+    返回缩放后的 K_new
+    """
+    H0, W0 = orig_size
+    H1, W1 = new_size
+
+    sx = W1 / W0  # 水平方向缩放比例
+    sy = H1 / H0  # 垂直方向缩放比例
+
+    K_new = K.copy().astype(float)
+    K_new[0, 0] *= sx  # fx
+    K_new[1, 1] *= sy  # fy
+    K_new[0, 2] *= sx  # cx
+    K_new[1, 2] *= sy  # cy
+
+    return K_new
 
 
 def load_vggt_model(device="cuda", verbose=True):
@@ -124,16 +128,6 @@ def run_vggt(
     return out
 
 
-def save_ply(points: np.ndarray, path: str):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write("ply\nformat ascii 1.0\n")
-        f.write(f"element vertex {points.shape[0]}\n")
-        f.write("property float x\nproperty float y\nproperty float z\nend_header\n")
-        for p in points:
-            f.write(f"{p[0]} {p[1]} {p[2]}\n")
-
-
 # ==========================
 # 主函数接口
 # ==========================
@@ -141,8 +135,6 @@ def reconstruct_from_frames(
     imgs: list[torch.Tensor],
     outdir: Path,
     conf_thres: float = 50.0,
-    random_sample: Optional[int] = None,
-    export_ply: bool = False,
     prediction_mode: str = "Depthmap and Camera Branch",
     verbose: bool = True,
     gpu: int = 0,
@@ -158,7 +150,7 @@ def reconstruct_from_frames(
           'time': float
         }
     """
-    t0 = time.time()
+
     device = f"cuda:{gpu}" if torch.cuda.is_available() else "cpu"
     if "cuda" not in device:
         raise RuntimeError("VGGT 需要 GPU。")
@@ -171,14 +163,6 @@ def reconstruct_from_frames(
     # 3. 推理
     preds = run_vggt(imgs, model, device)
 
-    # * 可视化相机位姿
-    # plot_cameras_matplotlib(
-    #     preds,
-    #     out_dir=outdir / "camera_poses",
-    #     axis_len=0.1,
-    #     title="Estimated Camera Poses",
-    # )
-
     plot_cameras_from_predictions(
         predictions=preds,
         out_path=outdir / "camera_poses" / "camera_poses.png",
@@ -187,48 +171,15 @@ def reconstruct_from_frames(
         center_mode="mean",  # 不以相机为原点，而是整体居中
     )
 
-    # 4. 保存 npz
-    npz_path = outdir / "predictions.npz"
-    np.savez(npz_path, **preds)
-
-    # 5. 导出 glb
-    glb_path = (
-        outdir / f"scene_conf{conf_thres}_mode{prediction_mode.replace(' ', '_')}.glb"
-    )
-    glb = predictions_to_glb(
-        preds,
+    # 4. 保存结果
+    result_info = save_inference_results(
+        preds=preds,
+        outdir=outdir,
         conf_thres=conf_thres,
-        filter_by_frames="All",
-        show_cam=True,
-        mask_black_bg=False,
-        mask_white_bg=False,
-        mask_sky=False,
-        target_dir=outdir,
         prediction_mode=prediction_mode,
     )
-    glb.export(file_obj=glb_path)
-    print(f"Saved GLB → {glb_path}")
 
-    # 6. 导出 ply（可选）
-    ply_path = None
-    if export_ply:
-        pts = preds["world_points_from_depth"].reshape(-1, 3)
-        mask = np.isfinite(pts).all(axis=1)
-        pts = pts[mask]
-        if random_sample and pts.shape[0] > random_sample:
-            idx = np.random.choice(len(pts), random_sample, replace=False)
-            pts = pts[idx]
-        ply_path = outdir / "pointcloud.ply"
-        save_ply(pts, ply_path)
-
-    return dict(
-        npz_path=npz_path,
-        glb_path=glb_path,
-        ply_path=ply_path,
-        n_frames=len(imgs),
-        time=time.time() - t0,
-        preds=preds,
-    )
+    return result_info
 
 
 # --------------------------------------------------------------------------- #
@@ -265,11 +216,15 @@ def process_multi_view_video(
         pt_file_path=right_pt_path.as_posix(),
     )
 
+    all_frame_x3d = []
+
     for idx in tqdm(
         range(0, min(len(left_frames), len(right_frames))), desc="Processing frames"
     ):
+        # if idx > 60: break
+
         # save images
-        img_dir = out_dir / f"frame_{idx:04d}" / "raw_images"
+        img_dir = out_dir / "frames" / f"frame_{idx:04d}" / "raw_images"
         img_dir.mkdir(parents=True, exist_ok=True)
         write_png(left_frames[idx].permute(2, 0, 1), img_dir / f"left_{idx:04d}.png")
         write_png(right_frames[idx].permute(2, 0, 1), img_dir / f"right_{idx:04d}.png")
@@ -280,47 +235,103 @@ def process_multi_view_video(
                 left_frames[idx],
                 right_frames[idx],
             ],
-            outdir=out_dir / f"frame_{idx:04d}" / "vggt_res",
+            outdir=out_dir / "frames" / f"frame_{idx:04d}" / "vggt_res",
             conf_thres=cfg.infer.get("conf_thres", 50.0),
             prediction_mode=cfg.infer.get(
                 "prediction_mode", "Depthmap and Camera Branch"
             ),
-            export_ply=cfg.infer.get("export_ply", False),
-            random_sample=cfg.infer.get("random_sample", None),
             gpu=cfg.infer.get("gpu", 0),
             verbose=bool(cfg.runtime.get("verbose", True)),
         )
 
         logger.info(
             f"[OK-MV] {left_video_path.name} & {right_video_path.name} | "
-            f"frames={result.get('n_frames', 'NA')} | "
+            f"frames number={idx} | "
             f"npz={Path(result['npz_path']).name if 'npz_path' in result else 'NA'} | "
             f"glb={Path(result['glb_path']).name if 'glb_path' in result else 'NA'} | "
-            f"time={result.get('time', 0.0):.2f}s"
         )
 
         # run triangulation and reprojection
         # 这里是相机在世界坐标系下的 R,t,C
         camera_extrinsics = result["preds"]["extrinsic"]
-        camera_intrinsics = result["preds"][
-            "intrinsic"
-        ]  # TODO: 相机内参是被缩放过的，这里还需要修改
+        camera_intrinsics = result["preds"]["intrinsic"]
         R, t, C = extrinsic_to_RT(camera_extrinsics)
 
-        joints_3d_all = triangulate_one_frame(
+        camera_intrinsics_resized = []
+        for i in range(len(camera_intrinsics)):
+            camera_intrinsics_resized.append(
+                scale_intrinsics(
+                    camera_intrinsics[i],
+                    orig_size=(294, 518),
+                    new_size=(left_frames[idx].shape[0], left_frames[idx].shape[1]),
+                )
+            )
+
+        x3d, reprojet_err = triangulate_one_frame(
             kptL=left_kpts[idx],
             kptR=right_kpts[idx],
             frame_L=left_frames[idx].numpy(),
             frame_R=right_frames[idx].numpy(),
-            K=np.stack([K, K], axis=0),
+            K=np.stack(
+                [camera_intrinsics_resized[0], camera_intrinsics_resized[1]], axis=0
+            ),
             R=np.stack([R[0], R[1]], axis=0),
             T=np.stack([t[0], t[1]], axis=0),
-            save_dir=out_dir / f"frame_{idx:04d}" / "triangulation",
+            save_dir=out_dir / "frames" / f"frame_{idx:04d}" / "triangulation",
             dist=None,
             visualize_3d=True,
-            reproject_check=True,
+            frame_num=idx,
         )
 
+        # write reprojetion error to log
+        with open(out_dir / "reprojection_error.txt", "a") as f:
+            f.write(f"Frame {idx:04d} Reprojection Error (in pixels):\n")
+            for k, v in reprojet_err.items():
+                if isinstance(v, np.ndarray):
+                    continue
+                f.write(f"  {k}: {v}\n")
+
+        # filter by reprojection error
+        if reprojet_err.get("mean_err_L", np.inf) < cfg.infer.get(
+            "reproj_err", 20
+        ) and reprojet_err.get("mean_err_R", np.inf) < cfg.infer.get("reproj_err", 20):
+            best_out_dir = out_dir / "best_frames"
+            best_out_dir.mkdir(parents=True, exist_ok=True)
+
+            # copy the results to best_frames
+
+            shutil.copy(
+                out_dir / f"frames/frame_{idx:04d}/triangulation/stereo_pose_frame.jpg",
+                best_out_dir / f"frame_{idx:04d}.jpg",
+            )
+
+        all_frame_x3d.append(x3d)
+
+    # merge all best frames into one video
+
+    best_frames = sorted(best_out_dir.glob("*.jpg"))
+    if len(best_frames) > 0:
+        first_frame = cv2.imread(best_frames[0].as_posix())
+        height, width, _ = first_frame.shape
+        video_writer = cv2.VideoWriter(
+            (out_dir / "best_frames_video.mp4").as_posix(),
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            10,
+            (width, height),
+        )
+        for frame_path in best_frames:
+            frame = cv2.imread(frame_path.as_posix())
+            video_writer.write(frame)
+        video_writer.release()
+
+    # update 3d information to pt file
+    update_pt_with_3d_info(
+        left_pt_path=left_pt_path,
+        right_pt_path=right_pt_path,
+        all_frame_x3d=all_frame_x3d,
+        out_pt_path=out_dir / "fuse_3d_pose.pt",
+        reprojet_err=reprojet_err,
+    )
     return out_dir
 
 

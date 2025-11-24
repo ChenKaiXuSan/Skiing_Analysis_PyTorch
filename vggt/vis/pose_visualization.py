@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Union, Dict
 
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 import numpy as np
 import torch
 
@@ -43,7 +44,76 @@ __all__ = [
     "compute_bone_stats",
 ]
 
-# ---- 新增：骨长计算 ----
+# COCO 17 关节点的典型索引
+COCO_NOSE = 0
+COCO_L_SHOULDER = 5
+COCO_R_SHOULDER = 6
+COCO_L_HIP = 11
+COCO_R_HIP = 12
+COCO_L_ANKLE = 15
+COCO_R_ANKLE = 16
+
+
+def _set_axes_by_body_shape(
+    ax3d, pts_plot: np.ndarray, camera_centers: Optional[np.ndarray] = None
+):
+    """
+    根据 COCO 3D 关键点自动设置坐标范围，但同时考虑摄像机位置，避免摄像机被裁掉。
+    """
+    pts = np.asarray(pts_plot, float)
+
+    # === 把相机加入整体点云范围（不影响骨盆/头部检测） ===
+    if camera_centers is not None:
+        camera_centers = np.asarray(camera_centers, float)
+        pts = np.vstack([pts, camera_centers])
+
+    J = pts_plot.shape[0]
+
+    def safe_get(idx):
+        return pts_plot[idx] if idx < J and np.all(np.isfinite(pts_plot[idx])) else None
+
+    nose = safe_get(COCO_NOSE)
+    l_sh = safe_get(COCO_L_SHOULDER)
+    r_sh = safe_get(COCO_R_SHOULDER)
+    l_hip = safe_get(COCO_L_HIP)
+    r_hip = safe_get(COCO_R_HIP)
+    l_ank = safe_get(COCO_L_ANKLE)
+    r_ank = safe_get(COCO_R_ANKLE)
+
+    if l_hip is not None and r_hip is not None:
+        pelvis = 0.5 * (l_hip + r_hip)
+    else:
+        pelvis = np.nanmean(pts_plot, axis=0)
+
+    if l_ank is not None and r_ank is not None:
+        foot = 0.5 * (l_ank + r_ank)
+    else:
+        foot = pts_plot[np.argmin(pts_plot[:, 2])]
+
+    if nose is not None:
+        head = nose
+    else:
+        head = pts_plot[np.argmax(pts_plot[:, 2])]
+
+    body_height = np.linalg.norm(head - foot) + 1e-6
+    shoulder_width = (
+        np.linalg.norm(l_sh - r_sh)
+        if l_sh is not None and r_sh is not None
+        else pts_plot[:, 0].max() - pts_plot[:, 0].min()
+    )
+    depth_range_human = pts_plot[:, 1].max() - pts_plot[:, 1].min()
+
+    # === 关键变化：加入相机的全局范围 ===
+    depth_range = max(depth_range_human, pts[:, 1].max() - pts[:, 1].min())
+    width_range = max(shoulder_width, pts[:, 0].max() - pts[:, 0].min())
+    height_range = max(body_height, pts[:, 2].max() - pts[:, 2].min())
+
+    half = 0.3 * max(height_range, width_range, depth_range)
+
+    cx, cy, cz = pelvis
+    ax3d.set_xlim(cx - half, cx + half)
+    ax3d.set_ylim(cy - half, cy + half)
+    ax3d.set_zlim(cz - half, cz + half)
 
 
 def compute_bone_lengths(
@@ -106,9 +176,8 @@ def draw_camera(
     T: np.ndarray,  # (3,) or (3,1)
     K: np.ndarray,  # (3,3)
     image_size: Tuple[int, int],  # (W, H) in px
-    axis_len: float = 1,
-    frustum_depth: float = 1,
-    colors: Tuple[str, str, str] = ("r", "g", "b"),
+    axis_len: float = 0.1,
+    frustum_depth: float = 0.1,
     label: Optional[str] = None,
     ray_scale_mode: Literal[
         "depth", "focal"
@@ -151,6 +220,7 @@ def draw_camera(
     T = np.asarray(T, dtype=float).reshape(3, 1)
     K = np.asarray(K, dtype=float).reshape(3, 3)
     W, H = [float(x) for x in image_size]
+    # W, H = image_size
 
     # ------- OpenCV(world) -> Matplotlib(world) 线性映射 -------
     # x 保持；z(前) -> y(前)；-y(上) -> z(上)
@@ -176,7 +246,7 @@ def draw_camera(
     # rows of R_wc: x_cam,y_cam,z_cam expressed in world(OpenCV) coords
     axes_cv = R_wc.copy()
     lw_axis = float(linewidths.get("axis", 2.0))
-    for axis_cv, color in zip(axes_cv, colors):
+    for axis_cv, color in zip(axes_cv, ("r", "g", "b")):
         end_vec_cv = axis_cv * axis_len  # (3,)
         end_vec_plt = M @ end_vec_cv
         ax.plot(
@@ -259,13 +329,12 @@ def _ensure_joints3d_arr(joints_3d: Union[np.ndarray, torch.Tensor]) -> np.ndarr
 
 def visualize_3d_joints(
     joints_3d: Union[np.ndarray, torch.Tensor],
-    R: np.ndarray,
-    T: np.ndarray,
-    K: np.ndarray,
+    R: List[np.ndarray],
+    T: List[np.ndarray],
+    K: List[np.ndarray],
     image_size: Tuple[int, int],
-    save_path: Union[str, Path],
+    save_path: Path,
     title: str = "Triangulated 3D Joints",
-    dpi: int = 300,
     show_stats: bool = True,  # 是否叠加骨长统计文本
 ) -> Optional[Dict[str, float]]:
     """
@@ -275,7 +344,6 @@ def visualize_3d_joints(
       - 可选在每条骨中点标注长度
     返回: 若 show_stats=True 则返回统计字典；否则 None
     """
-    save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
     pts = _ensure_joints3d_arr(joints_3d).astype(float)
@@ -287,8 +355,14 @@ def visualize_3d_joints(
     ax = fig.add_subplot(111, projection="3d")
 
     # 相机
-    draw_camera(ax=ax, R=R[0], T=T[0], K=K[0], image_size=image_size, label="Cam1")
-    draw_camera(ax=ax, R=R[1], T=T[1], K=K[1], image_size=image_size, label="Cam2")
+    center_L = draw_camera(
+        ax=ax, R=R[0], T=T[0], K=K[0], image_size=image_size, label="Left Cam"
+    )
+    center_R = draw_camera(
+        ax=ax, R=R[1], T=T[1], K=K[1], image_size=image_size, label="Right Cam"
+    )
+
+    camera_centers = np.stack([center_L, center_R])  # (2,3)
 
     # 可视化坐标置换（Y 朝上）
     # 把pts从cv2世界系映射到matplotlib世界系
@@ -359,15 +433,162 @@ def visualize_3d_joints(
             bbox=dict(facecolor="white", alpha=0.6, edgecolor="none"),
         )
 
+    _set_axes_by_body_shape(ax, pts_plot, camera_centers)
+
     plt.tight_layout()
 
-    # ax.set_zlim(ax.get_zlim()[::-1])
-    # ax.set_xlim(-5, 5)
-    # ax.set_ylim(-5, 25)
-    # ax.set_zlim(-10, 30)
-
-    fig.savefig(str(save_path), dpi=dpi)
+    fig.savefig(str(save_path), dpi=500)
     plt.close(fig)
-    print(f"[INFO] Saved: {save_path}")
+    logger.info(f"[Saved] {save_path}")
 
     return stats if show_stats else None
+
+
+def save_stereo_pose_frame(
+    img_left: np.ndarray,  # (H,W,3)
+    img_right: np.ndarray,  # (H,W,3)
+    kpt_left: np.ndarray,  # (J,2)
+    kpt_right: np.ndarray,  # (J,2)
+    pose_3d: np.ndarray,  # (J,3)
+    output_path: Path,
+    R: np.ndarray,  # (2,3,3)
+    T: np.ndarray,  # (2,3)
+    K: np.ndarray,  # (2,3,3)
+    repoj_error: Dict[str, float] = None,
+    frame_num: int = 0,
+):
+    """
+    渲染一个 frame：左图+右图+3D pose，并保存成PNG。
+    """
+    skeleton = COCO_SKELETON
+    J = pose_3d.shape[0]
+
+    fig = plt.figure(figsize=(10, 8))
+    fig.suptitle(f"Frame {frame_num}")
+    gs = GridSpec(2, 2, figure=fig)
+
+    # -------- 右视角 ---------- #
+    axR = fig.add_subplot(gs[1, 0])
+    axR.imshow(img_right)
+    axR.axis("off")
+    axR.set_title("Right view")
+
+    for i, j in skeleton:
+        axR.plot(
+            [kpt_right[i, 0], kpt_right[j, 0]],
+            [kpt_right[i, 1], kpt_right[j, 1]],
+            color="blue",
+        )
+    axR.scatter(kpt_right[:, 0], kpt_right[:, 1], s=10, c="yellow", edgecolors="white")
+    for i, (x, y) in enumerate(kpt_right):
+        axR.text(x, y, str(i), size=8)
+
+    # -------- 左视角 ---------- #
+    axL = fig.add_subplot(gs[0, 0])
+    axL.imshow(img_left)
+    axL.axis("off")
+    axL.set_title("Left view")
+
+    for i, j in skeleton:
+        if i < J and j < J:
+            axL.plot(
+                [kpt_left[i, 0], kpt_left[j, 0]],
+                [kpt_left[i, 1], kpt_left[j, 1]],
+                color="red",
+            )
+    axL.scatter(kpt_left[:, 0], kpt_left[:, 1], s=10, c="yellow", edgecolors="white")
+    for i, (x, y) in enumerate(kpt_left):
+        axL.text(x, y, str(i), size=8)
+
+    # -------- 3D pose ---------- #
+    ax3d = fig.add_subplot(gs[:, 1], projection="3d")
+    ax3d.set_title("3D Pose")
+    ax3d.axis("on")
+
+    # --- 在原世界坐标系中计算人体尺度 ---
+    pts = pose_3d.astype(float)
+
+    # 骨盆宽度
+    pelvis = np.linalg.norm(pts[11] - pts[12])
+    target_pelvis = 0.38  # 期望肩宽/骨盆宽度（单位 m，可根据需要调整）
+
+    # scale = target_pelvis / pelvis
+    scale = 1.0  # 回退，不缩放
+
+    # 应用缩放（只在可视化空间里用）
+    pts_scaled = pts * scale
+
+    # OpenCV 世界系 -> Matplotlib 世界系 (Y up)
+    M = np.array(
+        [
+            [1.0, 0.0, 0.0],  # x -> x
+            [0.0, 0.0, 1.0],  # z -> y
+            [0.0, -1.0, 0.0],  # -y -> z
+        ],
+        dtype=float,
+    )
+    pts_plot = (M @ pts_scaled.T).T  # (J,3)，这下坐标系和相机绘制一致了
+
+    # 相机（用同一套尺度绘制）
+    center_l = draw_camera(
+        ax=ax3d,
+        R=R[0],
+        T=T[0],
+        K=K[0],
+        image_size=(img_left.shape[1], img_left.shape[0]),
+        label="Left Cam",
+    )
+    center_r = draw_camera(
+        ax=ax3d,
+        R=R[1],
+        T=T[1],
+        K=K[1],
+        image_size=(img_right.shape[1], img_right.shape[0]),
+        label="Right Cam",
+    )
+
+    camera_centers = np.stack([center_l, center_r])  # (2,3)
+
+    # 画 3D 关节点
+    ax3d.scatter(pts_plot[:, 0], pts_plot[:, 1], pts_plot[:, 2], c="blue", s=30)
+    for i, (x, y, z) in enumerate(pts_plot):
+        ax3d.text(x, y, z, str(i), size=8)
+
+    for i, j in skeleton:
+        if i < len(pts_plot) and j < len(pts_plot):
+            if not (
+                np.all(np.isfinite(pts_plot[i])) and np.all(np.isfinite(pts_plot[j]))
+            ):
+                continue
+            ax3d.plot(
+                [pts_plot[i, 0], pts_plot[j, 0]],
+                [pts_plot[i, 1], pts_plot[j, 1]],
+                [pts_plot[i, 2], pts_plot[j, 2]],
+                c="red",
+                linewidth=1,
+            )
+
+    # 按人体形状自动设置 xyz 取值范围（保持等比例）
+    _set_axes_by_body_shape(ax3d, pts_plot, camera_centers)
+
+    # Reproj error 文本
+    if repoj_error is not None:
+        txt = (
+            f"Reproj Error:\n"
+            f"L: {repoj_error['mean_err_L']:.2f} px\n"
+            f"R: {repoj_error['mean_err_R']:.2f} px"
+        )
+        ax3d.text2D(
+            0.02,
+            0.98,
+            txt,
+            transform=ax3d.transAxes,
+            va="top",
+            fontsize=9,
+            bbox=dict(facecolor="white", alpha=0.6, edgecolor="none"),
+        )
+
+    plt.tight_layout()
+    fig.savefig(output_path, dpi=300)
+    plt.close()
+    logger.info(f"[Saved] {output_path}")

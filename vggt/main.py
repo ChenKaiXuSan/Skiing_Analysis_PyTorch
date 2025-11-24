@@ -72,12 +72,13 @@ def main(cfg: DictConfig) -> None:
 
     # 并发线程数（可以在 cfg.runtime.num_workers 里改）
     num_workers = int(cfg.runtime.get("num_workers", 4))
-    debug_mode = bool(cfg.runtime.get("debug", False)) or os.getenv("VGGT_DEBUG", "0") == "1"
+    debug_mode = (
+        bool(cfg.runtime.get("debug", False)) or os.getenv("VGGT_DEBUG", "0") == "1"
+    )
 
     if debug_mode:
         logger.info("[Debug] debug_mode=True, 将使用单线程顺序执行，不启用多线程。")
         num_workers = 1
-
 
     # 搜索 patterns
     vid_patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
@@ -142,8 +143,9 @@ def main(cfg: DictConfig) -> None:
         pts = pts_map[subject_name]
 
         # 多视角：至少 2 个 video + 2 个 pt
+        # 2 is left, 1 is right
         if len(vids) >= 2 and len(pts) >= 2:
-            multi_pairs.append((subject_name, vids[0], vids[1], pts[0], pts[1]))
+            multi_pairs.append((subject_name, vids[1], vids[0], pts[1], pts[0]))
 
             extra = list(zip(vids, pts))
             single_jobs.extend(extra)

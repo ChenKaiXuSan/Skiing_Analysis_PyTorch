@@ -27,10 +27,8 @@ infer:
   conf_thres: 50.0
   prediction_mode: "Depthmap and Camera Branch"
   keep_frames: true
-  export_ply: true
-  voxel_size: 0.0
-  random_sample: null
   gpu: 1
+  reproj_err: 10
 
 runtime:
   verbose: true
