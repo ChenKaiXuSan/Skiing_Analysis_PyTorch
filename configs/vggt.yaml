@@ -28,7 +28,7 @@ infer:
   prediction_mode: "Depthmap and Camera Branch"
   keep_frames: true
   gpu: 1
-  reproj_err: 10
+  reproj_err: 20
 
 runtime:
   verbose: true
@@ -39,3 +39,13 @@ runtime:
 
 dataset:
   recursive: false
+
+bundle_adjustment:
+  run_ba: true
+  lr: 1e-2
+  ba_weight_reproj: 1.0
+  ba_weight_smooth: 0.1
+  ba_weight_baseline: 0.01
+  ba_weight_bone_length: 0.1
+  ba_weight_pose_temporal: 0.1
+  num_iters:  200

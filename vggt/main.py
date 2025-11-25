@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from vggt.infer import process_multi_view_video, process_single_view_video
+from vggt.multi_view_process import process_multi_view_video
 
 logger = logging.getLogger(__name__)
 
@@ -218,18 +218,7 @@ def main(cfg: DictConfig) -> None:
                 cfg=cfg,
             )
             return job_type, subject_name, left_v, out_dir
-        else:  # "single"
-            v = payload["video"]
-            p = payload["pt"]
-            logger.info(f"[Single-view] {v.name} START")
-            out_dir = process_single_view_video(
-                video_path=v,
-                pt_path=p,
-                out_root=out_root,
-                cfg=cfg,
-            )
-            return job_type, v.name, v, out_dir
-
+        
     # 统一线程池：multi + single 一起并行
     if debug_mode:
         # ---------------- 单线程顺序执行（方便下断点调试） ----------------

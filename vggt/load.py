@@ -19,11 +19,6 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
 
 import os
 import torch
@@ -193,6 +188,7 @@ def _load_pt(file_path: str) -> Dict[str, Any]:
         raise FileNotFoundError(f"Missing file: {file_path}")
     logger.info(f"Loading: {file_path}")
     return torch.load(file_path, map_location="cpu")
+
 
 def _to_numpy_xy(
     kpts: torch.Tensor,
