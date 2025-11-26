@@ -11,6 +11,7 @@ paths:
   pt_path: /workspace/data/pt
   video_path: /workspace/data/side_raw # this is raw data path, with left and right side view.
   log_path: logs/vggt/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  inference_output_path: /workspace/data/vggt_npy
 
 # Model
 model:
@@ -32,8 +33,6 @@ infer:
 
 runtime:
   verbose: true
-  run_multi_view: true
-  run_single_view: true
   num_workers: 4
   debug: false
 
@@ -49,4 +48,4 @@ bundle_adjustment:
   ba_weight_bone_length: 0.1
   ba_weight_pose_temporal: 0.1
   num_iters: 10000
-  mode: "pose_only"  # options: "full", "pose_only"
+  mode: "pose_only" # options: "full", "pose_only"

@@ -2,6 +2,7 @@
 # -*- coding:utf-8 -*-
 """
 Batch process: run VGGT-based multi-view reconstruction for each subject.
+(Single-thread version: no multithreading)
 
 Author: Kaixu Chen
 Last Modified: 2025-11-25
@@ -11,7 +12,6 @@ import os
 import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -59,6 +59,7 @@ def main(cfg: DictConfig) -> None:
     video_root = Path(cfg.paths.video_path).resolve()
     pt_root = Path(cfg.paths.pt_path).resolve()
     out_root = Path(cfg.paths.log_path).resolve()
+    inference_output_path = Path(cfg.paths.inference_output_path).resolve()
 
     if not video_root.exists():
         raise FileNotFoundError(f"video_path not found: {video_root}")
@@ -66,19 +67,9 @@ def main(cfg: DictConfig) -> None:
         raise FileNotFoundError(f"pt_path not found: {pt_root}")
 
     out_root.mkdir(parents=True, exist_ok=True)
+    inference_output_path.mkdir(parents=True, exist_ok=True)
 
     recursive = bool(cfg.dataset.get("recursive", False))
-    subject_filter = set(cfg.dataset.get("subject_filter", []))
-
-    # 并发线程数
-    num_workers = int(cfg.runtime.get("num_workers", 4))
-    debug_mode = (
-        bool(cfg.runtime.get("debug", False)) or os.getenv("VGGT_DEBUG", "0") == "1"
-    )
-
-    if debug_mode:
-        logger.info("[Debug] debug_mode=True, 使用单线程顺序执行，不启用多线程。")
-        num_workers = 1
 
     # 搜索 patterns
     vid_patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
@@ -88,8 +79,6 @@ def main(cfg: DictConfig) -> None:
     # 扫描 video_root
     # ---------------------------------------------------------------------- #
     subjects_video = sorted([p for p in video_root.iterdir() if p.is_dir()])
-    if subject_filter:
-        subjects_video = [p for p in subjects_video if p.name in subject_filter]
 
     if not subjects_video:
         raise FileNotFoundError(f"No subject folders under: {video_root}")
@@ -109,8 +98,6 @@ def main(cfg: DictConfig) -> None:
     # 扫描 pt_root
     # ---------------------------------------------------------------------- #
     subjects_pt = sorted([p for p in pt_root.iterdir() if p.is_dir()])
-    if subject_filter:
-        subjects_pt = [p for p in subjects_pt if p.name in subject_filter]
 
     if not subjects_pt:
         raise FileNotFoundError(f"No subject folders under: {pt_root}")
@@ -142,11 +129,13 @@ def main(cfg: DictConfig) -> None:
         pts = pts_map[subject_name]
 
         # 多视角：至少 2 个 video + 2 个 pt
-        # 约定：vids[1]/pts[1] 为 left，vids[0]/pts[0] 为 right（按你原来的逻辑）
+        # 约定：vids[1]/pts[1] 为 left，vids[0]/pts[0] 为 right
         if len(vids) >= 2 and len(pts) >= 2:
             multi_pairs.append((subject_name, vids[1], vids[0], pts[1], pts[0]))
         else:
-            logger.warning(f"[Skip] {subject_name}: need >=2 videos and >=2 pts for multi-view")
+            logger.warning(
+                f"[Skip] {subject_name}: need >=2 videos and >=2 pts for multi-view"
+            )
 
     logger.info(f"Total matched subjects: {len(subjects)}")
     logger.info(f"Total multi-view pairs: {len(multi_pairs)}")
@@ -156,84 +145,37 @@ def main(cfg: DictConfig) -> None:
         logger.info("==== ALL DONE ====")
         return
 
-    run_multi_view = bool(cfg.runtime.get("run_multi_view", True))
-    if not run_multi_view:
-        logger.info("run_multi_view=False, nothing to do. EXIT.")
-        logger.info("==== ALL DONE ====")
-        return
-
     # ---------------------------------------------------------------------- #
-    # 构造任务列表（仅 multi-view）
+    # 顺序执行（无多线程）
     # ---------------------------------------------------------------------- #
-    jobs = []
-    for subject_name, left_v, right_v, left_pt, right_pt in multi_pairs:
-        jobs.append(
-            (
-                "multi",
-                dict(
-                    subject_name=subject_name,
-                    left_v=left_v,
-                    right_v=right_v,
-                    left_pt=left_pt,
-                    right_pt=right_pt,
-                ),
-            )
-        )
-
-    logger.info(
-        f"Submitting {len(jobs)} multi-view jobs with {num_workers} threads..."
-    )
-
     ok_mv = fail_mv = 0
 
-    def _run_job(job):
-        job_type, payload = job
-        assert job_type == "multi"
-        subject_name = payload["subject_name"]
-        left_v = payload["left_v"]
-        right_v = payload["right_v"]
-        left_pt = payload["left_pt"]
-        right_pt = payload["right_pt"]
+    for subject_name, left_v, right_v, left_pt, right_pt in multi_pairs:
         logger.info(f"[Subject: {subject_name}] Multi-view START")
-        out_dir = process_multi_view_video(
-            left_video_path=left_v,
-            left_pt_path=left_pt,
-            right_video_path=right_v,
-            right_pt_path=right_pt,
-            out_root=out_root,
-            cfg=cfg,
-        )
-        return job_type, subject_name, left_v, out_dir
-
-    # ---------------------------------------------------------------------- #
-    # 执行（单线程 / 多线程）
-    # ---------------------------------------------------------------------- #
-    if debug_mode:
-        # 单线程顺序执行（方便调试）
-        for job in jobs:
-            job_type, name, v_or_left, out_dir = _run_job(job)
+        try:
+            out_dir = process_multi_view_video(
+                left_video_path=left_v,
+                left_pt_path=left_pt,
+                right_video_path=right_v,
+                right_pt_path=right_pt,
+                out_root=out_root,
+                inference_output_path=inference_output_path,
+                cfg=cfg,
+            )
             if out_dir is None:
                 fail_mv += 1
-                logger.error(f"[Subject: {name}] Multi-view FAILED")
+                logger.error(
+                    f"[Subject: {subject_name}] Multi-view FAILED (None out_dir)"
+                )
             else:
                 ok_mv += 1
-                logger.info(f"[Subject: {name}] Multi-view OK")
-    else:
-        # 多线程并行执行
-        with ThreadPoolExecutor(max_workers=num_workers) as ex:
-            future_to_job = {ex.submit(_run_job, job): job for job in jobs}
-            for future in as_completed(future_to_job):
-                job_type, name, v_or_left, out_dir = future.result()
-                if out_dir is None:
-                    fail_mv += 1
-                    logger.error(f"[Subject: {name}] Multi-view FAILED")
-                else:
-                    ok_mv += 1
-                    logger.info(f"[Subject: {name}] Multi-view OK")
+                logger.info(f"[Subject: {subject_name}] Multi-view OK -> {out_dir}")
+        except Exception as e:
+            fail_mv += 1
+            logger.exception(
+                f"[Subject: {subject_name}] Multi-view FAILED with exception: {e}"
+            )
 
-    logger.info(
-        f"== Multi-View Summary | OK: {ok_mv} | Failed: {fail_mv} | Total: {ok_mv + fail_mv} =="
-    )
     logger.info("==== ALL DONE ====")
 
 

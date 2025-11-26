@@ -5,8 +5,6 @@ vggt_video_infer.py
 从单个视频抽帧并执行 VGGT 推理，可作为函数调用。
 """
 
-import cv2
-import shutil
 import logging
 import numpy as np
 import torch
@@ -19,7 +17,7 @@ from torchvision.io import write_png
 
 from vggt.reproject import reproject_and_visualize
 from vggt.load import load_info, load_and_preprocess_images
-from vggt.save import save_inference_results, update_pt_with_3d_info
+from vggt.save import save_camera_info
 
 from vggt.triangulate import triangulate_one_frame
 
@@ -74,6 +72,7 @@ def process_multi_view_video(
     right_video_path: Path,
     right_pt_path: Path,
     out_root: Path,
+    inference_output_path: Path,
     cfg: DictConfig,
 ) -> Optional[Path]:
     """
@@ -165,6 +164,16 @@ def process_multi_view_video(
         all_frame_R.append(R)
         all_frame_t.append(t)
         all_frame_C.append(C)
+
+    # save 3d info into npz
+    save_camera_info(
+        out_pt_path=inference_output_path / f"{subject}_multi_view_3d_info.npz",
+        all_frame_x3d=all_frame_raw_x3d,
+        all_frame_camera_intrinsics=all_frame_camera_intrinsics,
+        all_frame_R=all_frame_R,
+        all_frame_t=all_frame_t,
+        all_frame_C=all_frame_C,
+    )
 
     R_init = np.array(all_frame_R)  # (T,C,3,3)
     t_init = np.array(all_frame_t)  # (T,C,3)

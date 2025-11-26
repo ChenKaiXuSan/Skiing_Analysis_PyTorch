@@ -35,7 +35,7 @@ from vggt.vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from vggt.vggt.utils.geometry import unproject_depth_map_to_point_map
 
 from vggt.load import load_info, load_and_preprocess_images
-from vggt.save import save_inference_results, update_pt_with_3d_info
+from vggt.save import save_inference_results
 
 from vggt.vis.vggt_camera_vis import plot_cameras_from_predictions
 

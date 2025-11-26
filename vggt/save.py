@@ -81,32 +81,32 @@ def save_inference_results(
 
 
 # update 3d information to pt file
-def update_pt_with_3d_info(
-    left_pt_path: Path, right_pt_path: Path, out_pt_path: Path, reprojet_err: dict, all_frame_x3d: list[np.ndarray]
+def save_camera_info(
+    out_pt_path: Path,
+    all_frame_x3d: list[np.ndarray],
+    all_frame_camera_intrinsics: list[np.ndarray],
+    all_frame_R: list[np.ndarray],
+    all_frame_t: list[np.ndarray],
+    all_frame_C: list[np.ndarray],
 ):
     """
     更新 pt 文件，添加 3D 信息
 
     Args:
-        left_pt_path: 左目原始 pt 文件路径
-        right_pt_path: 右目原始 pt 文件路径
         out_pt_path: 输出 pt 文件路径
         reprojet_err: 重投影误差字典
     """
-    import torch
-
-    left_pt_data = torch.load(left_pt_path)
-    right_pt_data = torch.load(right_pt_path)
-    # 更新 3D 信息
 
     data = {
-
-        "left_data": left_pt_data,
-        "right_data": right_pt_data,
-        "reprojet_err": reprojet_err,
         "x3d_pose": np.stack(all_frame_x3d, axis=0),  # (N, J, 3)
+        "camera_intrinsics": np.stack(
+            all_frame_camera_intrinsics, axis=0
+        ),  # (N, C, 3, 3)
+        "R": np.stack(all_frame_R, axis=0),  # (N, C, 3, 3)
+        "t": np.stack(all_frame_t, axis=0),  # (N, C, 3)
+        "C": np.stack(all_frame_C, axis=0),  # (N, C, 3)
     }
 
     # 保存更新后的 pt 文件
-    torch.save(data, out_pt_path)
+    np.savez_compressed(out_pt_path.with_suffix(".npz"), **data)
     logger.info(f"Updated PT with 3D info → {out_pt_path}")
