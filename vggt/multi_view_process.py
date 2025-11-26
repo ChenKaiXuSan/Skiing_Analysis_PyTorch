@@ -92,11 +92,14 @@ def process_multi_view_video(
 
     # * load info from pt and video
     left_kpts, left_kpt_scores, *_, left_frames = load_info(
-        video_file_path=left_video_path.as_posix(), pt_file_path=left_pt_path.as_posix()
+        video_file_path=left_video_path.as_posix(),
+        pt_file_path=left_pt_path.as_posix(),
+        assume_normalized=False,
     )
     right_kpts, right_kpt_scores, *_, right_frames = load_info(
         video_file_path=right_video_path.as_posix(),
         pt_file_path=right_pt_path.as_posix(),
+        assume_normalized=False,
     )
 
     all_frame_raw_x3d = []
@@ -111,7 +114,7 @@ def process_multi_view_video(
     for idx in tqdm(
         range(0, min(len(left_frames), len(right_frames))), desc="Processing frames"
     ):
-        # if idx > 30:
+        # if idx > 10:
         #     break
 
         # save images
@@ -149,26 +152,12 @@ def process_multi_view_video(
         )
 
         # write reprojetion error to log
-        with open(out_dir / "reprojection_error.txt", "a") as f:
+        with open(out_dir / "raw_reprojection_error.txt", "a") as f:
             f.write(f"Frame {idx:04d} Reprojection Error (in pixels):\n")
             for k, v in reprojet_err.items():
                 if isinstance(v, np.ndarray):
                     continue
                 f.write(f"  {k}: {v}\n")
-
-        # filter by reprojection error
-        # if reprojet_err.get("mean_err_L", np.inf) < cfg.infer.get(
-        #     "reproj_err", 20
-        # ) and reprojet_err.get("mean_err_R", np.inf) < cfg.infer.get("reproj_err", 20):
-        #     best_out_dir = out_dir / "best_frames"
-        #     best_out_dir.mkdir(parents=True, exist_ok=True)
-
-        #     # copy the results to best_frames
-
-        #     shutil.copy(
-        #         out_dir / f"frames/frame_{idx:04d}/triangulation/stereo_pose_frame.jpg",
-        #         best_out_dir / f"frame_{idx:04d}.jpg",
-        #     )
 
         all_frame_raw_x3d.append(x3d)
         all_frame_camera_extrinsics.append(camera_extrinsics)
@@ -193,33 +182,58 @@ def process_multi_view_video(
         ]
     )  # (T,C,J)
 
+    # mode = cfg.bundle_adjustment.get("mode", "pose_only")
+    for mode in ["pose_only", "pose_cam_t", "full"]:
+        bundle_adjustment(
+            cfg=cfg,
+            out_dir=out_dir,
+            R_init=R_init,
+            t_init=t_init,
+            X3d_init=X3d_init,
+            x2d=x2d,
+            conf2d=conf2d,
+            all_frame_camera_intrinsics=all_frame_camera_intrinsics,
+            left_frames=left_frames,
+            right_frames=right_frames,
+            left_kpts=left_kpts,
+            right_kpts=right_kpts,
+            mode=mode,
+        )
+
+
+def bundle_adjustment(
+    cfg,
+    out_dir,
+    R_init,
+    t_init,
+    all_frame_camera_intrinsics,
+    X3d_init,
+    x2d,
+    conf2d,
+    left_frames,
+    right_frames,
+    left_kpts,
+    right_kpts,
+    mode="pose_only",
+):
     # bundle adjustment
-    out_dir_ba = out_dir / "ba_results"
+    out_dir_ba = out_dir / "ba_results" / mode
     out_dir_ba.mkdir(parents=True, exist_ok=True)
 
     # 对摄像机的K取平均
     avg_K = np.mean(np.array(all_frame_camera_intrinsics), axis=0)
 
-    # R_init: (T, C, 3, 3), t_init: (T, C, 3)
-    T, C = R_init.shape[:2]
-
-    rvec_init = np.zeros((T, C, 3, 3), dtype=np.float32)
-    for t in range(T):
-        for c in range(C):
-            rvec, _ = cv2.Rodrigues(R_init[t, c])
-            rvec_init[t, c] = rvec.reshape(3)
-
     # 转成 torch
-    rvec_init_torch = torch.from_numpy(rvec_init)  # (T,C,3,3)
+    rvec_init_torch = torch.from_numpy(R_init)  # (T,C,3,3)
     tvec_init_torch = torch.from_numpy(t_init)  # (T,C,3)
     X3d_init_torch = torch.from_numpy(X3d_init)  # (T,J,3)
     K_torch = torch.from_numpy(avg_K).float()  # (C,3,3)
     x2d_torch = torch.from_numpy(x2d).float()  # (T,C,J,2)
     conf2d_torch = torch.from_numpy(conf2d).float()  # (T,C,J)
 
-    X_opt, t_opt = run_local_ba(
+    R_opt, t_opt, X_opt, history = run_local_ba(
         K_torch=K_torch,  # (C,3,3)
-        R_init_torch=rvec_init_torch,  # (T,C,3,3)  固定
+        R_init_torch=rvec_init_torch,  # (T,C,3,3)  可优化
         t_init_torch=tvec_init_torch,  # (T,C,3)    可优化
         X3d_init_torch=X3d_init_torch,  # (T,J,3)    可优化
         x2d_torch=x2d_torch,  # (T,C,J,2)
@@ -227,24 +241,22 @@ def process_multi_view_video(
         num_iters=cfg.bundle_adjustment.get("num_iters", 200),
         lr=cfg.bundle_adjustment.get("lr", 1e-3),
         device=cfg.infer.get("device", "cuda"),
+        mode=mode,  # 优化模式,
     )
 
     # use the optimized results to draw and save
     for idx in range(X_opt.shape[0]):
-        frame_out_dir = out_dir_ba / f"frame_{idx:04d}"
-        frame_out_dir.mkdir(parents=True, exist_ok=True)
-
         frame_L = left_frames[idx].numpy()  # (H,W,3)
         frame_R = right_frames[idx].numpy()  # (H,W,3)
         kptL = left_kpts[idx]  # (J,2)
         kptR = right_kpts[idx]  # (J,2)
-        R = np.stack([all_frame_R[idx][0], all_frame_R[idx][1]], axis=0)  # (C,3,3)
-        t = t_opt[idx]  # (C,3)
+        R = R_opt[idx].cpu().numpy()
+        t = t_opt[idx].cpu().numpy()  # (C,3)
         K = K_torch.cpu().numpy()  # (3,3)
-        X3d = X_opt[idx]  # (J,3)
+        X3d = X_opt[idx].cpu().numpy()  # (J,3)
 
         # reproject and visualize
-        res = reproject_and_visualize(
+        ba_reproj_err = reproject_and_visualize(
             img1=frame_L,
             img2=frame_R,
             X3=X3d,
@@ -257,15 +269,24 @@ def process_multi_view_video(
             R=R,  # （2，3，3），世界》相机
             T=t,  # （2，3），世界》相机
             joint_names=None,  # 或者传 COCO 的关节名列表
-            out_path=frame_out_dir / f"ba_reproj_{idx:04d}.jpg",
+            out_path=out_dir_ba / "ba_reproj" / f"{idx:04d}.jpg",
         )
+
+        # write reprojetion error to log
+        with open(out_dir_ba / "ba_reprojection_error.txt", "a") as f:
+            f.write(f"Frame {idx:04d} Reprojection Error (in pixels):\n")
+            for k, v in ba_reproj_err.items():
+                if isinstance(v, np.ndarray):
+                    continue
+                f.write(f"  {k}: {v}\n")
+
         # ---- 可视化 3D ---- #
         visualize_3d_joints(
             R=R,
             T=t,
             K=K,
             joints_3d=X3d,
-            save_path=frame_out_dir / f"3d_joints_{idx:04d}.png",
+            save_path=out_dir_ba / "3d_joints" / f"{idx:04d}.png",
             title=f"3D Triangulated Result",
             image_size=(frame_L.shape[1], frame_L.shape[0]),
         )
@@ -279,8 +300,8 @@ def process_multi_view_video(
             kpt_left=kptL,
             kpt_right=kptR,
             pose_3d=X3d,
-            output_path=frame_out_dir / f"stereo_pose_frame_{idx:04d}.jpg",
-            repoj_error=res,
+            output_path=out_dir_ba / "stereo_pose_frame" / f"{idx:04d}.jpg",
+            repoj_error=ba_reproj_err,
             frame_num=idx,
         )
 

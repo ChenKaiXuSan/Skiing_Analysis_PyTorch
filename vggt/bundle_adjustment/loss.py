@@ -1,102 +1,120 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 """
-File: /workspace/code/vggt/bundle_adjustment/loss.py
-Project: /workspace/code/vggt/bundle_adjustment
-Created Date: Tuesday November 25th 2025
+Differentiable losses for multi-view bundle adjustment
 Author: Kaixu Chen
------
-Comment:
-
-Have a good code time :)
------
-Last Modified: Thursday November 20th 2025 5:47:43 pm
-Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
------
-Copyright (c) 2025 The University of Tsukuba
------
-HISTORY:
-Date      	By	Comments
-----------	---	---------------------------------------------------------
 """
 
+from typing import Optional
 import torch
 
-def project_points(X3d, R, t, K):
+
+# ----------------------------------------------------------
+#  Differentiable projection: WORLD 3D → pixel 2D
+# ----------------------------------------------------------
+import torch
+
+def project_points(
+    X3d: torch.Tensor,  # (T,J,3) or (J,3)
+    R: torch.Tensor,    # (T,C,3,3) or (C,3,3)
+    t: torch.Tensor,    # (T,C,3)   or (C,3)
+    K: torch.Tensor,    # (C,3,3)   or (T,C,3,3)
+) -> torch.Tensor:
     """
-    X3d: (T, J, 3)          # 每帧的 3D 关节点（世界坐标系）
-    R:   (T, C, 3, 3)       # 每帧、每相机的旋转（world -> camera）
-    t:   (T, C, 3)          # 每帧、每相机的平移（world -> camera）
-    K:   (C, 3, 3)          # 每个相机的内参
-    return:
-        x2d_pred: (T, C, J, 2)  # 投影到各相机平面上的 2D 坐标（像素）
+    Vectorised projection for all frames / cameras / joints.
+    Return: (T,C,J,2)
     """
+    device = X3d.device
+    dtype = X3d.dtype
+
+    K = K.to(device=device, dtype=dtype)
+    R = R.to(device=device, dtype=dtype)
+    t = t.to(device=device, dtype=dtype)
+
+    # ---- ensure time dim ----
+    if X3d.dim() == 2:        # (J,3) -> (1,J,3)
+        X3d = X3d.unsqueeze(0)
     T, J, _ = X3d.shape
-    C = R.shape[1]
 
-    # ---- 1) 将 3D 点复制到每个相机 ----
-    # X: (T, C, J, 3)
-    X = X3d[:, None, :, :].expand(-1, C, -1, -1)
+    # ---- handle R,t shapes ----
+    if R.dim() == 3:          # (C,3,3) -> (T,C,3,3)
+        C = R.shape[0]
+        R = R.unsqueeze(0).expand(T, -1, -1, -1)
+        t = t.unsqueeze(0).expand(T, -1, -1)
+    elif R.dim() == 4:        # (T,C,3,3)
+        T_R, C, _, _ = R.shape
+        assert T_R == T
+        if t.dim() == 2:      # (C,3) -> (T,C,3)
+            t = t.unsqueeze(0).expand(T, -1, -1)
+        else:
+            assert t.shape[:2] == (T, C)
+    else:
+        raise ValueError(f"Unsupported R shape: {R.shape}")
 
-    # ---- 2) world -> camera: X_cam = R * X + t ----
-    # 调整维度方便做 batch matmul
-    # R_exp: (T, C, 1, 3, 3)
-    R_exp = R.unsqueeze(2)
-    # X_vec: (T, C, J, 3, 1)
-    X_vec = X.unsqueeze(-1)
-    # (T,C,1,3,3) @ (T,C,J,3,1) -> (T,C,J,3,1)
-    X_cam = (R_exp @ X_vec).squeeze(-1)        # (T, C, J, 3)
-    # 加平移 t: (T,C,1,3) -> (T,C,J,3)
-    X_cam = X_cam + t.unsqueeze(2)
+    # ---- world -> camera ----
+    # X: (T,C,J,3)
+    X = X3d.unsqueeze(1).expand(-1, C, -1, -1)
 
-    # ---- 3) 归一化坐标 ----
-    Z = X_cam[..., 2:3].clamp(min=1e-6)        # 防止除零
-    x_norm = X_cam[..., 0:1] / Z
-    y_norm = X_cam[..., 1:2] / Z
-    # 齐次坐标: (x,y,1)
-    xy1 = torch.cat([x_norm, y_norm, torch.ones_like(x_norm)], dim=-1)  # (T,C,J,3)
+    # 显式给 R 多一个 J 维度，避免广播错位
+    # R_exp: (T,C,1,3,3) -> 自动广播到 (T,C,J,3,3)
+    R_exp = R.unsqueeze(2)                 # (T,C,1,3,3)
+    X_vec = X.unsqueeze(-1)                # (T,C,J,3,1)
+    X_cam = torch.matmul(R_exp, X_vec).squeeze(-1)  # (T,C,J,3)
 
-    # ---- 4) 乘相机内参 K ----
-    # K: (C,3,3) -> (1,C,1,3,3), 让 T 和 J 自动广播
-    K_exp = K[None, :, None, :, :]             # (1,C,1,3,3)
-    # xy1_vec: (T,C,J,3,1)
-    xy1_vec = xy1.unsqueeze(-1)
-    # proj_h: (T,C,J,3,1)
-    proj_h = K_exp @ xy1_vec
-    proj = proj_h.squeeze(-1)[..., :2]         # (T,C,J,2)
+    X_cam = X_cam + t.unsqueeze(2)         # (T,C,J,3)
+
+    # ---- normalised coords ----
+    Z = X_cam[..., 2:3].clamp(min=1e-6)
+    xy_norm = X_cam[..., 0:2] / Z          # (T,C,J,2)
+
+    ones = torch.ones_like(Z)
+    xy1 = torch.cat([xy_norm, ones], dim=-1)  # (T,C,J,3)
+
+    # ---- intrinsics ----
+    if K.dim() == 3:                       # (C,3,3)
+        K_expand = K.unsqueeze(0).unsqueeze(2)   # (1,C,1,3,3)
+    elif K.dim() == 4:                     # (T,C,3,3)
+        K_expand = K.unsqueeze(2)               # (T,C,1,3,3)
+    else:
+        raise ValueError(f"Unsupported K shape: {K.shape}")
+
+    proj_h = torch.matmul(K_expand, xy1.unsqueeze(-1))  # (T,C,J,3,1)
+    proj = proj_h.squeeze(-1)[..., :2]                  # (T,C,J,2)
 
     return proj
 
 
-def reprojection_loss(X3d, R, t, K, x2d, conf2d, w=1.0):
-    x2d_pred = project_points(X3d, R, t, K)  # (T,C,J,2)
-    diff = (x2d_pred - x2d) ** 2  # (T,C,J,2)
-    diff = diff.sum(dim=-1)  # (T,C,J)
-    loss = (conf2d * diff).sum() / (conf2d.sum() + 1e-6)
-    return w * loss
+# ----------------------------------------------------------
+#  Losses
+# ----------------------------------------------------------
+def reprojection_loss(X3d, R, t, K, x2d, conf2d, w=1.0) -> torch.Tensor:
+    pred = project_points(X3d, R, t, K)  # (T,C,J,2)
+    diff = (pred - x2d) ** 2  # (T,C,J,2)
+    diff = diff.sum(-1)  # (T,C,J)
+    return w * (conf2d * diff).sum() / (conf2d.sum() + 1e-6)
 
 
 def camera_center_from_Rt(R, t):
-    # C = -R^T t
-    RT = R.transpose(-1, -2)  # (T,C,3,3)
-    C = -(RT @ t[..., None]).squeeze(-1)  # (T,C,3)
-    return C
+    RT = R.transpose(-1, -2)
+    C = -(RT @ t[..., None]).squeeze(-1)
+    return C  # (T,C,3)
 
 
 def camera_smooth_loss(R, t, w=1e-2):
-    C = camera_center_from_Rt(R, t)  # (T,C,3)
-    diff = C[1:] - C[:-1]  # (T-1,C,3)
+    C = camera_center_from_Rt(R, t)
+    diff = C[1:] - C[:-1]
     return w * (diff**2).mean()
 
 
 def baseline_reg_loss(R, t, w=1e-2):
-    C = camera_center_from_Rt(R, t)  # (T,C,3)
-    # 假设C=2（左、右相机）
-    baseline = torch.norm(C[:, 0] - C[:, 1], dim=-1)  # (T,)
-    b0 = baseline.mean().detach()
-    return w * ((baseline - b0) ** 2).mean()
+    C = camera_center_from_Rt(R, t)
+    if C.shape[1] < 2:  # single-camera case
+        return torch.tensor(0.0, device=C.device)
+    baseline = torch.norm(C[:, 0] - C[:, 1], dim=-1)
+    return w * ((baseline - baseline.mean().detach()) ** 2).mean()
 
 
+# Skeletal topology
 BONES = [
     (11, 13),
     (13, 15),
@@ -114,31 +132,24 @@ BONES = [
 
 
 def bone_length_loss(X3d, ref_bone_len=None, w=1e-2):
-    """
-    X3d: (T,J,3)
-    ref_bone_len: (len(BONES),) or None
-    """
     T, J, _ = X3d.shape
     lens = []
     for i, j in BONES:
         if i >= J or j >= J:
             continue
-        seg = X3d[..., i, :] - X3d[..., j, :]  # (T,3)
-        lens.append(torch.norm(seg, dim=-1))  # (T,)
+        seg = X3d[..., i, :] - X3d[..., j, :]
+        lens.append(torch.norm(seg, dim=-1))
     if not lens:
         return torch.tensor(0.0, device=X3d.device)
-    L = torch.stack(lens, dim=-1)  # (T, B)
-
-    if ref_bone_len is None:
-        # 用平均长度当作参考（不固定绝对数值，只约束同一条骨前后一致）
-        ref = L.mean(dim=0, keepdim=True).detach()  # (1,B)
-    else:
-        ref = ref_bone_len[None, :]  # (1,B)
-
-    loss = ((L - ref) ** 2).mean()
-    return w * loss
+    L = torch.stack(lens, dim=-1)  # (T,B)
+    ref = (
+        L.mean(0, keepdim=True).detach()
+        if ref_bone_len is None
+        else ref_bone_len[None, :].to(X3d.device)
+    )
+    return w * ((L - ref) ** 2).mean()
 
 
 def pose_temporal_loss(X3d, w=1e-2):
-    diff = X3d[1:] - X3d[:-1]  # (T-1,J,3)
+    diff = X3d[1:] - X3d[:-1]
     return w * (diff**2).mean()

@@ -289,7 +289,7 @@ def reproject_and_visualize(
     joint_names: Optional[Sequence[str]] = None,
     circle_r: int = 5,
     thickness: int = 2,
-    out_path: str = "/mnt/data/reprojection_compare.jpg",
+    out_path: Path = Path("reprojection_panel.jpg"),
 ) -> Dict[str, object]:
     """
     封装：重投影 + 可视化 + 保存。

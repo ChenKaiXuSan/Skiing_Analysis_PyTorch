@@ -48,4 +48,5 @@ bundle_adjustment:
   ba_weight_baseline: 0.01
   ba_weight_bone_length: 0.1
   ba_weight_pose_temporal: 0.1
-  num_iters:  200
+  num_iters: 10000
+  mode: "pose_only"  # options: "full", "pose_only"

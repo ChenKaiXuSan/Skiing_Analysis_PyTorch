@@ -35,6 +35,7 @@ def process_video_3d(
     left_path: Path,
     right_path: Path,
     out_dir: Path,
+    npy_dir: Path,
 ):
     # FIXME: 这里只是为了合并代码，改好了之后就删除掉
     args = parse_args()
@@ -73,7 +74,9 @@ def process_video_3d(
         all_fused.append(fused_3d)
 
         if diag is not None:
-            print("mean gain:", diag["mean_gain"], "bad frames:", diag["bad_frames"][:10])
+            print(
+                "mean gain:", diag["mean_gain"], "bad frames:", diag["bad_frames"][:10]
+            )
 
     save_coco3d_gif_multi_view(all_fused, out_dir / "fused", fps=30, swap_yz=False)
     logger.info(f"Saved fused GIF to: {out_dir / 'fused_pose.gif'}")
@@ -83,7 +86,7 @@ def process_video_3d(
         fused_joints_3d=np.array(all_fused),
         left_joints_3d=left_kpt_3d,
         right_joints_3d=right_kpt_3d,
-        save_dir=out_dir / "fused" / "fused_joints.npy",
+        save_dir=Path(str(npy_dir) + "_fused_keypoints.npy"),
     )
 
     # * evaluate fused pose
@@ -102,9 +105,9 @@ def process_video_3d(
 # ---------- 多人批量处理入口 ----------
 @hydra.main(config_path="../configs", config_name="videopose3d")
 def main_pt(config):
-
     input_root = Path(config.paths.pt_path)
     output_root = Path(config.paths.log_path)
+    npy_root = Path(config.paths.npy_path)
 
     subjects = sorted(input_root.glob("*/"))
     if not subjects:
@@ -119,12 +122,14 @@ def main_pt(config):
         right_path = person_dir / "osmo_2.pt"
 
         out_dir = output_root / person_name
+        npy_dir = npy_root / person_name
 
         process_video_3d(
             config=config,
             left_path=left_path,
             right_path=right_path,
             out_dir=out_dir,
+            npy_dir=npy_dir,
         )
 
 

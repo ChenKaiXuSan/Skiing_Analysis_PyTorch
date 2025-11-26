@@ -589,6 +589,7 @@ def save_stereo_pose_frame(
         )
 
     plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=300)
     plt.close()
     logger.info(f"[Saved] {output_path}")

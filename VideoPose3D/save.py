@@ -19,11 +19,11 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
-import os
-import numpy as np
-from pathlib import Path
 
 import logging
+
+from pathlib import Path
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
