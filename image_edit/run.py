@@ -48,7 +48,7 @@ def process_one_video(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # * load info from pt and video
-    *_, frames = load_info(
+    frames = load_info(
         video_file_path=video_path.as_posix(),
         pt_file_path=pt_path.as_posix(),
         assume_normalized=False,

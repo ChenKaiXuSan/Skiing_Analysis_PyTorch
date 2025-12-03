@@ -48,6 +48,7 @@ class CameraEditor:
     # ============== 模型加载部分 ==============
     def load_model(self):
         dtype = torch.bfloat16 # maybe bfloat16
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
         print("torch.__version__    =", torch.__version__)
@@ -62,18 +63,19 @@ class CameraEditor:
             )
 
         pipe = QwenImageEditPlusPipeline.from_pretrained(
-            "/workspace/Qwen-Image-Edit-Angles/models/Qwen-Image-Edit-2509",
+            "/work/SKIING/chenkaixu/models/Qwen-Image-Edit-2509",
             transformer=QwenImageTransformer2DModel.from_pretrained(
-                "/workspace/Qwen-Image-Edit-Angles/models/Qwen-Image-Edit-Rapid-AIO/transformer",
+                "/work/SKIING/chenkaixu/models/Qwen-Image-Edit-Rapid-AIO",
+                subfolder="transformer",
                 torch_dtype=dtype,
                 device_map="auto",  # 如果你只想用 cuda:1，也可以改成 device_map=None 然后 .to(device)
             ),
             torch_dtype=dtype,
-        )
+        ).to(self.device)
 
         # 加载 LoRA：镜头转换
         pipe.load_lora_weights(
-            "/workspace/Qwen-Image-Edit-Angles/lora/multiple-angles",
+            "/work/SKIING/chenkaixu/lora/multiple-angles",
             weight_name="镜头转换.safetensors",
             adapter_name="angles",
         )
@@ -168,7 +170,7 @@ class CameraEditor:
         print(f"[Seed] {seed}")
 
         generator = torch.Generator(
-            device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device=self.device
         ).manual_seed(seed)
 
         if image is None:

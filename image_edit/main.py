@@ -81,7 +81,6 @@ def main(cfg: DictConfig) -> None:
     video_root = Path(cfg.paths.video_path).resolve()
     pt_root = Path(cfg.paths.pt_path).resolve()
     out_root = Path(cfg.paths.log_path).resolve()
-    inference_output_path = Path(cfg.paths.inference_output_path).resolve()
 
     if not video_root.exists():
         raise FileNotFoundError(f"video_path not found: {video_root}")
@@ -89,7 +88,6 @@ def main(cfg: DictConfig) -> None:
         raise FileNotFoundError(f"pt_path not found: {pt_root}")
 
     out_root.mkdir(parents=True, exist_ok=True)
-    inference_output_path.mkdir(parents=True, exist_ok=True)
 
     recursive = bool(cfg.dataset.get("recursive", False))
 
