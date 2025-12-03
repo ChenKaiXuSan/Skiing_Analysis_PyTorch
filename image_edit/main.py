@@ -170,16 +170,14 @@ def main(cfg: DictConfig) -> None:
     # ---------------------------------------------------------------------- #
     # 顺序执行（无多线程）
     # ---------------------------------------------------------------------- #
-    ok_mv = fail_mv = 0
-
     for subject_name, left_v, right_v, left_pt, right_pt in multi_pairs:
-        logger.info(f"[Subject: {subject_name}] Multi-view START")
+        logger.info(f"[Subject: {subject_name}] START")
 
         out_dir = process_one_video(
             video_path=left_v,
             pt_path=left_pt,
             out_dir=out_root,
-            inference_output_path=inference_output_path,
+            flag="left",
             cfg=cfg,
         )
 
@@ -187,7 +185,7 @@ def main(cfg: DictConfig) -> None:
             video_path=right_v,
             pt_path=right_pt,
             out_dir=out_root,
-            inference_output_path=inference_output_path,
+            flag="right",
             cfg=cfg,
         )
 
