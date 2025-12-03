@@ -55,6 +55,15 @@
         "runtime.debug=true",
         "infer.gpu=0",
       ]
+    },
+    {
+      "name": "image_edit run",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "image_edit.main",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": []
     }
   ]
 }
