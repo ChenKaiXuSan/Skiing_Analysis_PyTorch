@@ -65,6 +65,16 @@
       "console": "integratedTerminal",
       "args": [
       ]
+    },
+    {
+      "name": "bundle_adjustment",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "bundle_adjustment.main",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+      ]
     }
   ]
 }
