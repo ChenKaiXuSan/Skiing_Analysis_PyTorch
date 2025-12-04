@@ -50,8 +50,8 @@ def process_one_video(
     pipe = CameraEditor(cfg=cfg)
 
     for idx in tqdm(range(0, frames.shape[0]), desc="Processing frames"):
-        if idx > 1:
-            break
+        # if idx > 1:
+        #     break
         for rotate_deg in [-90, -45, 0, 45, 90]:
             result_img, used_seed, prompt = pipe.infer_camera_edit(
                 image=frames[idx],
