@@ -28,7 +28,7 @@ infer:
   conf_thres: 50.0
   keep_frames: true
   num_inference_steps: 4
-  gpu: 1
+  gpu: 0
 
 dataset:
   recursive: false

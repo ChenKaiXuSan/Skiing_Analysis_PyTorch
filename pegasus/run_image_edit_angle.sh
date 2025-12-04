@@ -30,4 +30,4 @@ echo "Current virtual environment: $(which python)"
 root_path=/work/SKIING/chenkaixu/data/skiing
 
 # === 运行你的训练脚本（Hydra 参数可以加在后面）===
-python -m image_edit.main paths.video_path=${root_path}/side_raw model.root_path=/work/1/SKIING/chenkaixu/code/Skiing_Analysis_PyTorch/ckpt/qwen
+python -m image_edit.main paths.video_path=${root_path}/side_raw model.root_path=/work/1/SKIING/chenkaixu/code/Skiing_Analysis_PyTorch/ckpt/qwen infer.gpu=0

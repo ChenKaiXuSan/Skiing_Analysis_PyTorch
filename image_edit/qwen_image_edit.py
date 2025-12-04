@@ -45,9 +45,9 @@ class CameraEditor:
         self.cfg = cfg
 
         self.model_path = cfg.model
-        self.pipe = self.load_model()
+        self.device = cfg.infer.gpu
 
-        self.device = self.cfg.infer.gpu
+        self.pipe = self.load_model()
 
         self.MAX_SEED = np.iinfo(np.int32).max
 
@@ -76,7 +76,7 @@ class CameraEditor:
                 device_map="auto",  # 如果你只想用 cuda:1，也可以改成 device_map=None 然后 .to(device)
             ),
             torch_dtype=dtype,
-        )
+        ).to(self.device)
 
         # 加载 LoRA：镜头转换
         pipe.load_lora_weights(

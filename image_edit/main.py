@@ -65,7 +65,7 @@ def find_files(
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
-@hydra.main(config_path="../configs", config_name="qwen-image-edit", version_base=None)
+@hydra.main(config_path="../configs", config_name="qwen_image_edit", version_base=None)
 def main(cfg: DictConfig) -> None:
     # logging 设置
     logging.basicConfig(
