@@ -10,7 +10,6 @@
 cd /work/SKIING/chenkaixu/code/Skiing_Analysis_PyTorch
 
 mkdir -p logs/pegasus/
-mkdir -p checkpoints/
 
 # === 加载 Python + 激活 Conda 环境 ===
 module load intelpython/2022.3.1
@@ -31,4 +30,4 @@ echo "Current virtual environment: $(which python)"
 root_path=/work/SKIING/chenkaixu/data/skiing
 
 # === 运行你的训练脚本（Hydra 参数可以加在后面）===
-python -m image_edit.main paths.pt_path=${root_path}/pt paths.video_path=${root_path}/side_raw
+python -m image_edit.main paths.video_path=${root_path}/side_raw model.root_path=/work/1/SKIING/chenkaixu/code/Skiing_Analysis_PyTorch/ckpt/qwen
