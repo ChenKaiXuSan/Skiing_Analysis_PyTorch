@@ -63,7 +63,8 @@
       "module": "image_edit.main",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "args": []
+      "args": [
+      ]
     }
   ]
 }

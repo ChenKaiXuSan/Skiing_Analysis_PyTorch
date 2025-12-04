@@ -34,21 +34,26 @@ from image_edit.qwenimage.transformer_qwenimage import QwenImageTransformer2DMod
 from image_edit.qwenimage.qwen_fa3_processor import QwenDoubleStreamAttnProcessorFA3
 
 import logging
+from omegaconf import DictConfig
 
 
 logger = logging.getLogger(__name__)
 
 
 class CameraEditor:
-    def __init__(self):
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
+
+        self.model_path = cfg.model
         self.pipe = self.load_model()
+
+        self.device = self.cfg.infer.gpu
 
         self.MAX_SEED = np.iinfo(np.int32).max
 
     # ============== 模型加载部分 ==============
     def load_model(self):
-        dtype = torch.bfloat16 # maybe bfloat16
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        dtype = torch.bfloat16  # maybe bfloat16
 
         print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
         print("torch.__version__    =", torch.__version__)
@@ -63,19 +68,19 @@ class CameraEditor:
             )
 
         pipe = QwenImageEditPlusPipeline.from_pretrained(
-            "/work/SKIING/chenkaixu/models/Qwen-Image-Edit-2509",
+            self.model_path.qwen_image_edit,
             transformer=QwenImageTransformer2DModel.from_pretrained(
-                "/work/SKIING/chenkaixu/models/Qwen-Image-Edit-Rapid-AIO",
+                self.model_path.qwen_image_edit_rapid,
                 subfolder="transformer",
                 torch_dtype=dtype,
                 device_map="auto",  # 如果你只想用 cuda:1，也可以改成 device_map=None 然后 .to(device)
             ),
             torch_dtype=dtype,
-        ).to(self.device)
+        )
 
         # 加载 LoRA：镜头转换
         pipe.load_lora_weights(
-            "/work/SKIING/chenkaixu/lora/multiple-angles",
+            self.model_path.qwen_image_multiple_angles,
             weight_name="镜头转换.safetensors",
             adapter_name="angles",
         )
@@ -169,14 +174,16 @@ class CameraEditor:
             seed = random.randint(0, self.MAX_SEED)
         print(f"[Seed] {seed}")
 
-        generator = torch.Generator(
-            device=self.device
-        ).manual_seed(seed)
+        generator = torch.Generator(device=self.device).manual_seed(seed)
 
         if image is None:
             raise ValueError("image 不能为空")
-        
-        pil_image = Image.fromarray(np.array(image)).convert("RGB") if not isinstance(image, Image.Image) else image.convert("RGB")
+
+        pil_image = (
+            Image.fromarray(np.array(image)).convert("RGB")
+            if not isinstance(image, Image.Image)
+            else image.convert("RGB")
+        )
 
         # 高宽为空时，可以不传，走模型默认
         h = height if (height is not None and height != 0) else None

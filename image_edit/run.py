@@ -20,22 +20,20 @@
     # 不设任何控制，相当于原图（因为 prompt = "no camera movement" 时直接返回原图）
 """
 
+import logging
+from tqdm import tqdm
 from pathlib import Path
+from omegaconf import DictConfig, OmegaConf
+
+import torch
+from torchvision.io import read_video
 
 from image_edit.qwen_image_edit import CameraEditor
-
-from omegaconf import DictConfig, OmegaConf
-import logging
-
-from tqdm import tqdm
-from image_edit.load import load_info
-
 logger = logging.getLogger(__name__)
 
 
 def process_one_video(
     video_path: Path,
-    pt_path: Path,
     out_dir: Path,
     flag: str,
     cfg: DictConfig,
@@ -47,32 +45,20 @@ def process_one_video(
     out_dir = out_dir / subject / flag
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # * load info from pt and video
-    frames = load_info(
-        video_file_path=video_path.as_posix(),
-        pt_file_path=pt_path.as_posix(),
-        assume_normalized=False,
-    )
+    frames = read_video(video_path.as_posix(), pts_unit="sec", output_format="THWC")[0]
 
-    pipe = CameraEditor()
+    pipe = CameraEditor(cfg=cfg)
 
     for idx in tqdm(range(0, frames.shape[0]), desc="Processing frames"):
+        if idx > 1:
+            break
         for rotate_deg in [-90, -45, 0, 45, 90]:
-            # if idx > 10:
-            #     break
-
             result_img, used_seed, prompt = pipe.infer_camera_edit(
                 image=frames[idx],
                 rotate_deg=rotate_deg,
                 move_forward=0.0,
                 vertical_tilt=0.0,
-                wideangle=0,
-                # seed=args.seed,
-                # randomize_seed=not args.no_random_seed,
-                # true_guidance_scale=args.guidance,
-                # num_inference_steps=args.steps,
-                # height=args.height if args.height > 0 else None,
-                # width=args.width if args.width > 0 else None,
+                wideangle=False,
             )
 
             out_path = out_dir / f"frame_{idx:04d}" / f"edited_{rotate_deg}.png"
@@ -82,5 +68,9 @@ def process_one_video(
             logger.info(f"[Saved] {out_path}")
             logger.info(f"[Used seed] {used_seed}")
             logger.info(f"[Prompt] {prompt}")
+
+    # final
+    torch.cuda.empty_cache()
+    del pipe
 
     return out_dir

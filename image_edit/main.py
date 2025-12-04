@@ -65,7 +65,7 @@ def find_files(
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
-@hydra.main(config_path="../configs", config_name="vggt", version_base=None)
+@hydra.main(config_path="../configs", config_name="qwen-image-edit", version_base=None)
 def main(cfg: DictConfig) -> None:
     # logging 设置
     logging.basicConfig(
@@ -79,13 +79,12 @@ def main(cfg: DictConfig) -> None:
 
     # 读取路径
     video_root = Path(cfg.paths.video_path).resolve()
-    pt_root = Path(cfg.paths.pt_path).resolve()
     out_root = Path(cfg.paths.log_path).resolve()
 
     if not video_root.exists():
         raise FileNotFoundError(f"video_path not found: {video_root}")
-    if not pt_root.exists():
-        raise FileNotFoundError(f"pt_path not found: {pt_root}")
+    if not out_root.exists():
+        raise FileNotFoundError(f"log_path not found: {out_root}")
 
     out_root.mkdir(parents=True, exist_ok=True)
 
@@ -93,7 +92,6 @@ def main(cfg: DictConfig) -> None:
 
     # 搜索 patterns
     vid_patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
-    pt_patterns = ["*.pt"]
 
     # ---------------------------------------------------------------------- #
     # 扫描 video_root
@@ -115,47 +113,25 @@ def main(cfg: DictConfig) -> None:
             logger.warning(f"[No video] {subject_dir}")
 
     # ---------------------------------------------------------------------- #
-    # 扫描 pt_root
-    # ---------------------------------------------------------------------- #
-    subjects_pt = sorted([p for p in pt_root.iterdir() if p.is_dir()])
-
-    if not subjects_pt:
-        raise FileNotFoundError(f"No subject folders under: {pt_root}")
-
-    logger.info(f"Found {len(subjects_pt)} subjects in: {pt_root}")
-
-    # { subject_name: [pt files] }
-    pts_map: Dict[str, List[Path]] = {}
-    for subject_dir in subjects_pt:
-        pts = find_files(subject_dir, pt_patterns, recursive)
-        if pts:
-            pts_map[subject_dir.name] = pts
-        else:
-            logger.warning(f"[No pt] {subject_dir}")
-
-    # ---------------------------------------------------------------------- #
     # 构建 multi-view 任务（只保留多视角）
     # ---------------------------------------------------------------------- #
-    multi_pairs: List[Tuple[str, Path, Path, Path, Path]] = []
+    multi_pairs: List[Tuple[str, Path, Path]] = []
 
     logger.info("Matching video & pt for each subject (multi-view only)...")
 
-    subjects = sorted(set(videos_map.keys()) & set(pts_map.keys()))
+    subjects = sorted(set(videos_map.keys()))
     if not subjects:
         raise ValueError("没有任何 subject 同时包含 video 与 pt 文件")
 
     for subject_name in subjects:
         vids = videos_map[subject_name]
-        pts = pts_map[subject_name]
 
-        # 多视角：至少 2 个 video + 2 个 pt
-        # 约定：vids[1]/pts[1] 为 left，vids[0]/pts[0] 为 right
-        if len(vids) >= 2 and len(pts) >= 2:
-            multi_pairs.append((subject_name, vids[1], vids[0], pts[1], pts[0]))
+        # 多视角：至少 2 个 video
+        # 约定：vids[1] 为 left，vids[0] 为 right
+        if len(vids) >= 2:
+            multi_pairs.append((subject_name, vids[1], vids[0]))
         else:
-            logger.warning(
-                f"[Skip] {subject_name}: need >=2 videos and >=2 pts for multi-view"
-            )
+            logger.warning(f"[Skip] {subject_name}: need >=2 videos for multi-view")
 
     logger.info(f"Total matched subjects: {len(subjects)}")
     logger.info(f"Total multi-view pairs: {len(multi_pairs)}")
@@ -168,12 +144,11 @@ def main(cfg: DictConfig) -> None:
     # ---------------------------------------------------------------------- #
     # 顺序执行（无多线程）
     # ---------------------------------------------------------------------- #
-    for subject_name, left_v, right_v, left_pt, right_pt in multi_pairs:
+    for subject_name, left_v, right_v in multi_pairs:
         logger.info(f"[Subject: {subject_name}] START")
 
         out_dir = process_one_video(
             video_path=left_v,
-            pt_path=left_pt,
             out_dir=out_root,
             flag="left",
             cfg=cfg,
@@ -181,7 +156,6 @@ def main(cfg: DictConfig) -> None:
 
         out_dir = process_one_video(
             video_path=right_v,
-            pt_path=right_pt,
             out_dir=out_root,
             flag="right",
             cfg=cfg,
