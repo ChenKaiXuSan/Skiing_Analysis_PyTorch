@@ -38,7 +38,8 @@ from typing import Dict, List, Tuple
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from image_edit.run import process_one_video
+from .run import process_one_video
+
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ def main(cfg: DictConfig) -> None:
     # ---------------------------------------------------------------------- #
     # 构建 multi-view 任务（只保留多视角）
     # ---------------------------------------------------------------------- #
-    multi_pairs: List[Tuple[str, Path, Path]] = []
+    _pairs: List[Tuple[str, Path, Path]] = []
 
     logger.info("Matching video & pt for each subject (multi-view only)...")
 
@@ -126,38 +127,24 @@ def main(cfg: DictConfig) -> None:
     for subject_name in subjects:
         vids = videos_map[subject_name]
 
-        # 多视角：至少 2 个 video
-        # 约定：vids[1] 为 left，vids[0] 为 right
-        if len(vids) >= 2:
-            multi_pairs.append((subject_name, vids[1], vids[0]))
-        else:
-            logger.warning(f"[Skip] {subject_name}: need >=2 videos for multi-view")
+        for vid in vids:
+            if vid.stem == "osmo_1":
+                _pairs.append(("left", subject_name, vid))
+            elif vid.stem == "osmo_2":
+                _pairs.append(("right", subject_name, vid))
 
     logger.info(f"Total matched subjects: {len(subjects)}")
-    logger.info(f"Total multi-view pairs: {len(multi_pairs)}")
-
-    if not multi_pairs:
-        logger.info("No valid multi-view pairs found. EXIT.")
-        logger.info("==== ALL DONE ====")
-        return
 
     # ---------------------------------------------------------------------- #
     # 顺序执行（无多线程）
     # ---------------------------------------------------------------------- #
-    for subject_name, left_v, right_v in multi_pairs:
-        logger.info(f"[Subject: {subject_name}] START")
+    for flag, subject_name, vid in _pairs:
+        logger.info(f"{flag} {subject_name} START")
 
         out_dir = process_one_video(
-            video_path=left_v,
+            video_path=vid,
             out_dir=out_root,
-            flag="left",
-            cfg=cfg,
-        )
-
-        out_dir = process_one_video(
-            video_path=right_v,
-            out_dir=out_root,
-            flag="right",
+            flag=flag,
             cfg=cfg,
         )
 

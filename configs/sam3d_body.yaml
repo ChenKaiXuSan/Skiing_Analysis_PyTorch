@@ -8,6 +8,7 @@ hydra:
 # Path
 paths:
   video_path: /workspace/data/side_raw # this is raw data path, with left and right side view.
+  pt_path: /workspace/data/pt # 这里我们需要使用过滤后的bbox作为定位信息
   log_path: logs/sam3d-body/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 # Model

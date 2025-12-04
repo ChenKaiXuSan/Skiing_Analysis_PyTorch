@@ -21,26 +21,30 @@ Date      	By	Comments
 """
 
 import os
-from glob import glob
-from typing import Optional, List
-
+from pathlib import Path
+import logging
 import cv2
 import numpy as np
 import torch
 from tqdm import tqdm
 
 from omegaconf.omegaconf import DictConfig
-import os
-from glob import glob
 from typing import Optional, List, Tuple
+import matplotlib.pyplot as plt
 
-import cv2
-import numpy as np
-import torch
-from tqdm import tqdm
-
+from .load import load_info
 from .sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
-from sam3d_body.tools.vis_utils import visualize_sample_together
+from .tools.vis_utils import visualize_sample_together
+from .utils import (
+    setup_visualizer,
+    visualize_2d_results,
+    visualize_3d_mesh,
+    save_mesh_results,
+    display_results_grid,
+    process_image_with_mask,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class SAM3DBodyPipeline:
@@ -138,7 +142,7 @@ class SAM3DBodyPipeline:
     def process_image(
         self,
         image: np.ndarray,
-        *,
+        bboxes: np.ndarray,
         bbox_thresh: float = 0.8,
         use_mask: bool = False,
         return_outputs: bool = False,
@@ -157,6 +161,7 @@ class SAM3DBodyPipeline:
         """
         outputs = self.estimator.process_one_image(
             image,
+            bboxes=bboxes,
             bbox_thr=bbox_thresh,
             use_mask=use_mask,
         )
@@ -168,3 +173,66 @@ class SAM3DBodyPipeline:
             return vis_img, outputs
         return vis_img
 
+
+# ------------------------------------------------------------------ #
+# 高级接口（处理文件夹等）
+# ------------------------------------------------------------------ #
+def process_one_video(
+    video_path: Path,
+    pt_path: Path,
+    out_dir: Path,
+    cfg: DictConfig,
+):
+    """处理单个视频文件的镜头编辑。"""
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    _, _, bbox_xyxy, bbox_scores, frames = load_info(
+        pt_file_path=pt_path, video_file_path=video_path
+    )
+
+    pipe = SAM3DBodyPipeline(cfg=cfg)
+    # set up visualizer
+    visualizer = setup_visualizer()
+
+    for idx in tqdm(range(0, frames.shape[0]), desc="Processing frames"):
+        # if idx > 1:
+        #     break
+        vis_img, outputs = pipe.process_image(
+            image=frames[idx],
+            bboxes=bbox_xyxy[idx],
+            return_outputs=True,
+        )
+
+        out_path = out_dir / f"frame_{idx:04d}_vis.png"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(out_path.as_posix(), cv2.cvtColor(vis_img, cv2.COLOR_RGB2BGR))
+
+        logger.info(f"[Saved] {out_path}")
+
+        # 2D 结果可视化
+        # vis_results = visualize_2d_results(frames[idx], outputs, visualizer)
+
+        # # Display results using grid function
+        # titles = [f"Person {i} - 2D Keypoints & BBox" for i in range(len(vis_results))]
+        # display_results_grid(vis_results, titles, figsize_per_image=(6, 6))
+
+        # 3D 网格可视化
+        mesh_results = visualize_3d_mesh(frames[idx], outputs, pipe.estimator.faces)
+
+        # Display results
+        for i, combined_img in enumerate(mesh_results):
+            combined_rgb = cv2.cvtColor(combined_img, cv2.COLOR_BGR2RGB)
+
+            plt.figure(figsize=(20, 5))
+            plt.imshow(combined_rgb)
+            plt.title(f"Person {i}: Original | Mesh Overlay | Front View | Side View")
+            plt.axis("off")
+
+        plt.savefig(out_dir / f"frame_{idx:04d}_3d_mesh_visualization.png")
+
+    # final
+    torch.cuda.empty_cache()
+    del pipe
+
+    return out_dir

@@ -29,6 +29,7 @@ import torch
 from torchvision.io import read_video
 
 from image_edit.qwen_image_edit import CameraEditor
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,8 +51,8 @@ def process_one_video(
     pipe = CameraEditor(cfg=cfg)
 
     for idx in tqdm(range(0, frames.shape[0]), desc="Processing frames"):
-        if idx > 5:
-            break
+        # if idx > 5:
+        #     break
         for rotate_deg in [-90, -45, 0, 45, 90]:
             result_img, used_seed, prompt = pipe.infer_camera_edit(
                 image=frames[idx],

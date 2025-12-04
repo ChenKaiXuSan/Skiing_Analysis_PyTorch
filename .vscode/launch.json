@@ -63,8 +63,7 @@
       "module": "image_edit.main",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "args": [
-      ]
+      "args": []
     },
     {
       "name": "bundle_adjustment",
@@ -73,19 +72,18 @@
       "module": "bundle_adjustment.main",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "args": [
-      ]
+      "args": []
     },
     {
-      "name": "sam3d_body run",
+      "name": "sam3d_body_run",
       "type": "debugpy",
       "request": "launch",
       "module": "sam3d_body.main",
-      "cwd": "${workspaceFolder}",
+      "cwd": "$/workspace/code",
       "python": "/opt/conda/envs/sam_3d_body/bin/python",
       "console": "integratedTerminal",
       "args": [
-        "infer.gpu=1"
+        "infer.gpu=0"
       ]
     }
   ]
