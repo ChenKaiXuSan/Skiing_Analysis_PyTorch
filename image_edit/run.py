@@ -21,9 +21,10 @@
 """
 
 import logging
+import gc
 from tqdm import tqdm
 from pathlib import Path
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 import torch
 from torchvision.io import read_video
@@ -73,6 +74,8 @@ def process_one_video(
     # final
     torch.cuda.empty_cache()
     del pipe
+    del frames
+    gc.collect()
     logger.info(f"Finished processing {video_path}")
 
     return out_dir
