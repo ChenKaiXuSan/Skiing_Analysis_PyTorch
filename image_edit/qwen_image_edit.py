@@ -72,10 +72,10 @@ class CameraEditor:
                 self.model_path.qwen_image_edit_rapid,
                 subfolder="transformer",
                 torch_dtype=dtype,
-                device_map="auto",  # 如果你只想用 cuda:1，也可以改成 device_map=None 然后 .to(device)
+                # device_map="auto",  # 如果你只想用 cuda:1，也可以改成 device_map=None 然后 .to(device)
             ),
             torch_dtype=dtype,
-        )
+        ).to(self.device)
 
         # 加载 LoRA：镜头转换
         pipe.load_lora_weights(
@@ -173,9 +173,7 @@ class CameraEditor:
             seed = random.randint(0, self.MAX_SEED)
         print(f"[Seed] {seed}")
 
-        device = getattr(self.pipe, "device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-        # generator = torch.Generator(device=device).manual_seed(seed)
-        generator = torch.Generator().manual_seed(seed)
+        generator = torch.Generator(device=self.device).manual_seed(seed)
 
         if image is None:
             raise ValueError("image 不能为空")

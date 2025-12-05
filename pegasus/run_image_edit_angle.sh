@@ -22,7 +22,7 @@ nvidia-smi
 NUM_WORKERS=$(nproc)
 # 输出当前环境信息
 echo "Current working directory: $(pwd)"
-echo "Total CPU cores: $NUM_WORKERS, use $((NUM_WORKERS / 3)) for data loading"
+echo "Total CPU cores: $NUM_WORKERS"
 echo "Current Python version: $(python --version)"
 echo "Current virtual environment: $(which python)"
 

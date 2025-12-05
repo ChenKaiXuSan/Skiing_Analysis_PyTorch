@@ -7,6 +7,10 @@ Created Date: Wednesday December 3rd 2025
 Author: Kaixu Chen
 -----
 Comment:
+    简单命令行版本：读取多个视频文件，调用 Qwen-Image-Edit + multiple-angles LoRA 做“镜头变换”，
+    并把结果保存到指定位置。
+    
+    适用于多 subject、多视角的视频文件夹结构。
 
 Have a good code time :)
 -----
@@ -18,16 +22,6 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
-"""
-
-#!/usr/bin/env python3
-# -*- coding:utf-8 -*-
-"""
-Batch process: run VGGT-based multi-view reconstruction for each subject.
-(Single-thread version: no multithreading)
-
-Author: Kaixu Chen
-Last Modified: 2025-11-25
 """
 
 import os
@@ -118,7 +112,7 @@ def main(cfg: DictConfig) -> None:
     # ---------------------------------------------------------------------- #
     _pairs: List[Tuple[str, Path, Path]] = []
 
-    logger.info("Matching video & pt for each subject (multi-view only)...")
+    logger.info("Matching video for each subject ...")
 
     subjects = sorted(set(videos_map.keys()))
     if not subjects:
@@ -139,7 +133,7 @@ def main(cfg: DictConfig) -> None:
     # 顺序执行（无多线程）
     # ---------------------------------------------------------------------- #
     for flag, subject_name, vid in _pairs:
-        logger.info(f"{flag} {subject_name} START")
+        logger.info(f"{subject_name} {flag} START")
 
         out_dir = process_one_video(
             video_path=vid,
