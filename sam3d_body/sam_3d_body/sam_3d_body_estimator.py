@@ -13,9 +13,9 @@ from .data.transforms import (
     VisionTransformWrapper,
 )
 
-from sam3d_body.sam_3d_body.data.utils.io import load_image
-from sam3d_body.sam_3d_body.data.utils.prepare_batch import prepare_batch
-from sam3d_body.sam_3d_body.utils import recursive_to
+from .data.utils.io import load_image
+from .data.utils.prepare_batch import prepare_batch
+from .utils import recursive_to
 from torchvision.transforms import ToTensor
 
 
@@ -138,9 +138,9 @@ class SAM3DBodyEstimator:
         if masks is not None:
             # Use provided masks - ensure they match the number of detected boxes
             print(f"Using provided masks: {masks.shape}")
-            assert (
-                bboxes is not None
-            ), "Mask-conditioned inference requires bboxes input!"
+            assert bboxes is not None, (
+                "Mask-conditioned inference requires bboxes input!"
+            )
             masks = masks.reshape(-1, height, width, 1).astype(np.uint8)
             masks_score = np.ones(
                 len(masks), dtype=np.float32

@@ -1,12 +1,12 @@
-import os
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from .sam3d import process_one_video
+from .infer import process_one_video
 
 logger = logging.getLogger(__name__)
 

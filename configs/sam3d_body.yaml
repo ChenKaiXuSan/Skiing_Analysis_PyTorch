@@ -17,6 +17,11 @@ model:
   checkpoint_path: ${model.root_path}/model.ckpt
   mhr_path: ${model.root_path}/assets/mhr_model.pt
 
+  # detector_name: yolov8n
+  segmentor_name: sam_vit_b
+  fov_name: mhr
+
+
 visualize:
   save_video: true
   plot_3d: true

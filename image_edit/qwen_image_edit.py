@@ -20,21 +20,19 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
+import logging
 import os
 import random
 from typing import Optional, Tuple
 
 import numpy as np
 import torch
+from omegaconf import DictConfig
 from PIL import Image
 
-from image_edit.qwenimage.pipeline_qwenimage_edit_plus import QwenImageEditPlusPipeline
-from image_edit.qwenimage.transformer_qwenimage import QwenImageTransformer2DModel
-from image_edit.qwenimage.qwen_fa3_processor import QwenDoubleStreamAttnProcessorFA3
-
-import logging
-from omegaconf import DictConfig
-
+from .qwenimage.pipeline_qwenimage_edit_plus import QwenImageEditPlusPipeline
+from .qwenimage.qwen_fa3_processor import QwenDoubleStreamAttnProcessorFA3
+from .qwenimage.transformer_qwenimage import QwenImageTransformer2DModel
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +141,7 @@ class CameraEditor:
         return final_prompt if final_prompt else "no camera movement"
 
     # ============== 推理核心函数 ==============
-
+    @torch.no_grad()
     def infer_camera_edit(
         self,
         image: Image.Image,
