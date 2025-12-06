@@ -8,26 +8,26 @@ Author: Kaixu Chen
 Last Modified: August 4th, 2025
 """
 
-import os
-import numpy as np
-import hydra
 import logging
+import os
 from pathlib import Path
+
+import hydra
+import numpy as np
 from omegaconf import DictConfig
 
-logger = logging.getLogger(__name__)
 
 # videopose 3d
-from VideoPose3D.run import run_video_pose_3d
-from VideoPose3D.common.arguments import parse_args
+from .common.arguments import parse_args
 
 # fuse two view 3d poses
-from VideoPose3D.fuse.fuse import fuse_pose_no_extrinsics_h36m
-from VideoPose3D.fuse.fuse_eval import eval_fused_pose
+from .fuse.fuse import fuse_pose_no_extrinsics_h36m
+from .fuse.fuse_eval import eval_fused_pose
+from .run import run_video_pose_3d
+from .save import save_3d_joints
+from .visualization import save_coco3d_gif_multi_view
 
-from VideoPose3D.visualization import save_coco3d_gif_multi_view
-
-from VideoPose3D.save import save_3d_joints
+logger = logging.getLogger(__name__)
 
 
 def process_video_3d(

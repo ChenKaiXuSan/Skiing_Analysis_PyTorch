@@ -32,15 +32,25 @@ from tqdm import tqdm
 
 from .load import load_info
 from .sam_3d_body import SAM3DBodyEstimator, load_sam_3d_body
-from .save import save_mesh_results
+from .sam_3d_body.metadata.mhr70 import pose_info as mhr70_pose_info
+from .sam_3d_body.visualization.renderer import Renderer
+from .sam_3d_body.visualization.skeleton_visualizer import SkeletonVisualizer
+from .save import save_mesh_results, save_results
+from .tools.vis_utils import visualize_sample, visualize_sample_together
 from .vis import (
     display_results_grid,
-    setup_visualizer,
     visualize_2d_results,
     visualize_3d_mesh,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def setup_visualizer():
+    """Set up skeleton visualizer with MHR70 pose info"""
+    visualizer = SkeletonVisualizer(line_width=2, radius=5)
+    visualizer.set_pose_meta(mhr70_pose_info)
+    return visualizer
 
 
 def setup_sam_3d_body(
@@ -130,11 +140,13 @@ def process_one_video(
     video_path: Path,
     pt_path: Path,
     out_dir: Path,
+    inference_output_path: Path,
     cfg: DictConfig,
 ):
     """处理单个视频文件的镜头编辑。"""
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    inference_output_path.mkdir(parents=True, exist_ok=True)
 
     _, _, bbox_xyxy, bbox_scores, frames = load_info(
         pt_file_path=pt_path, video_file_path=video_path
@@ -144,20 +156,19 @@ def process_one_video(
     estimator = setup_sam_3d_body(cfg)
     visualizer = setup_visualizer()
 
+    all_outputs = []
+
     for idx in tqdm(range(0, frames.shape[0]), desc="Processing frames"):
         # if idx > 1:
         #     break
         outputs = estimator.process_one_image(
-            image=frames[idx],
+            img=frames[idx],
             bboxes=bbox_xyxy[idx],
         )
 
         # 2D 结果可视化
-        # vis_results = visualize_2d_results(frames[idx], outputs, visualizer)
-
-        # # Display results using grid function
-        # titles = [f"Person {i} - 2D Keypoints & BBox" for i in range(len(vis_results))]
-        # display_results_grid(vis_results, titles, figsize_per_image=(6, 6))
+        vis_results = visualize_2d_results(frames[idx], outputs, visualizer)
+        cv2.imwrite(out_dir / f"frame_{idx:04d}_2d_visualization.png", vis_results[0])
 
         # 3D 网格可视化
         mesh_results = visualize_3d_mesh(frames[idx], outputs, estimator.faces)
@@ -166,12 +177,22 @@ def process_one_video(
         for i, combined_img in enumerate(mesh_results):
             combined_rgb = cv2.cvtColor(combined_img, cv2.COLOR_BGR2RGB)
 
-            plt.figure(figsize=(20, 5))
-            plt.imshow(combined_rgb)
-            plt.title(f"Person {i}: Original | Mesh Overlay | Front View | Side View")
-            plt.axis("off")
+            cv2.imwrite(
+                out_dir / f"frame_{idx:04d}_3d_mesh_visualization_{i}.png", combined_img
+            )
 
-        plt.savefig(out_dir / f"frame_{idx:04d}_3d_mesh_visualization.png")
+        #
+        visualize_sample_together(
+            img_cv2=frames[idx],
+            outputs=outputs,
+            faces=estimator.faces,
+        )
+
+        visualize_sample(
+            img_cv2=frames[idx],
+            outputs=outputs,
+            faces=estimator.faces,
+        )
 
         # save mesh results to files
         save_mesh_results(
@@ -181,6 +202,17 @@ def process_one_video(
             save_dir=str(out_dir / f"frame_{idx:04d}_meshes"),
             image_name=f"frame_{idx:04d}",
         )
+
+        outputs = outputs[0]
+        outputs["frame"] = frames[idx]
+
+        all_outputs.append(outputs)
+
+    # save other results
+    save_results(
+        outputs=all_outputs,
+        save_dir=inference_output_path,
+    )
 
     # final
     torch.cuda.empty_cache()

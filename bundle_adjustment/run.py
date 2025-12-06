@@ -35,6 +35,7 @@ from .loss import (
 
 from bundle_adjustment.load import (
     load_info,
+    load_sam_3d_body_results,
     load_vggt_results,
     load_videopose3d_results,
 )
@@ -316,8 +317,10 @@ def run_local_ba(
 def process_one_person(
     left_video_path: Path,
     left_pt_path: Path,
+    left_sam3d_body_path: Path,
     right_video_path: Path,
     right_pt_path: Path,
+    right_sam3d_body_path: Path,
     vggt_files: List[Path],
     videopose3d_files: List[Path],
     out_root: Path,
@@ -366,6 +369,9 @@ def process_one_person(
             assume_normalized=False,
         )
     )
+
+    left_sam3d_body_res = load_sam_3d_body_results(left_sam3d_body_path.as_posix())
+    right_sam3d_body_res = load_sam_3d_body_results(right_sam3d_body_path.as_posix())
 
     videopose3d_res = load_videopose3d_results(videopose3d_files)
     vggt_res = load_vggt_results(vggt_files)

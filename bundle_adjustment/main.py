@@ -52,7 +52,7 @@ def build_subject_map(
     if not root.exists():
         raise FileNotFoundError(f"{name} root not found: {root}")
 
-    subjects = sorted([p for p in root.iterdir() if p.is_dir()])
+    subjects = sorted([p for p in root.iterdir()])
     if not subjects:
         raise FileNotFoundError(f"No subject folders under: {root}")
 
@@ -60,11 +60,14 @@ def build_subject_map(
 
     subject_map: Dict[str, List[Path]] = {}
     for subject_dir in subjects:
-        files = find_files(subject_dir, patterns, recursive)
-        if files:
-            subject_map[subject_dir.name] = files
-        else:
-            logger.warning(f"[{name}] [No files] {subject_dir}")
+        if subject_dir.is_dir():
+            files = find_files(subject_dir, patterns, recursive)
+            if files:
+                subject_map[subject_dir.name] = files
+            else:
+                logger.warning(f"[{name}] [No files] {subject_dir}")
+        elif subject_dir.is_file():
+            subject_map[subject_dir.stem] = subject_dir.resolve()
 
     return subject_map
 
@@ -93,6 +96,7 @@ def main(cfg: DictConfig) -> None:
     pt_root = Path(cfg.paths.pt_path).resolve()
     vggt_root = Path(cfg.paths.vggt_path).resolve()
     videopose3d_root = Path(cfg.paths.videopose3d_path).resolve()
+    sam3d_body_root = Path(cfg.paths.sam3d_body_path).resolve()
     out_root = Path(cfg.paths.log_path).resolve()
 
     out_root.mkdir(parents=True, exist_ok=True)
@@ -111,6 +115,9 @@ def main(cfg: DictConfig) -> None:
     vggt_map = build_subject_map(vggt_root, npz_patterns, recursive, name="vggt")
     videopose3d_map = build_subject_map(
         videopose3d_root, npz_patterns, recursive, name="videopose3d"
+    )
+    sam3d_body_map = build_subject_map(
+        sam3d_body_root, npz_patterns, recursive, name="sam3d_body"
     )
 
     # -------------------------- 构建 multi-view 任务 -------------------------- #
@@ -138,6 +145,7 @@ def main(cfg: DictConfig) -> None:
     for subject_name in subjects:
         vids = videos_map[subject_name]
         pts = pts_map[subject_name]
+        sam3d_body_files = sam3d_body_map[subject_name]
 
         # 多视角：至少 2 个 video + 2 个 pt
         # 约定：vids[1]/pts[1] 为 left，vids[0]/pts[0] 为 right
@@ -147,6 +155,8 @@ def main(cfg: DictConfig) -> None:
             left_pt, right_pt = pts[1], pts[0]
             vggt_files = vggt_map[subject_name]
             videopose3d_files = videopose3d_map[subject_name]
+            left_sam3d_body = sam3d_body_files[1]
+            right_sam3d_body = sam3d_body_files[0]
 
             multi_pairs.append(
                 (
@@ -155,6 +165,8 @@ def main(cfg: DictConfig) -> None:
                     right_v,
                     left_pt,
                     right_pt,
+                    left_sam3d_body,
+                    right_sam3d_body,
                     vggt_files,
                     videopose3d_files,
                 )
@@ -182,6 +194,8 @@ def main(cfg: DictConfig) -> None:
         right_v,
         left_pt,
         right_pt,
+        left_sam3d_body,
+        right_sam3d_body,
         vggt_files,
         videopose3d_files,
     ) in multi_pairs:
@@ -194,30 +208,22 @@ def main(cfg: DictConfig) -> None:
             f"  vggt_files: {vggt_files}\n"
             f"  videopose3d_files: {videopose3d_files}"
         )
-        try:
-            out_dir = process_one_person(
-                left_video_path=left_v,
-                left_pt_path=left_pt,
-                right_video_path=right_v,
-                right_pt_path=right_pt,
-                vggt_files=vggt_files,
-                videopose3d_files=videopose3d_files,
-                out_root=out_root,
-                cfg=cfg,
-            )
-            if out_dir is None:
-                fail_mv += 1
-                logger.error(
-                    f"[Subject: {subject_name}] Multi-view FAILED (None out_dir)"
-                )
-            else:
-                ok_mv += 1
-                logger.info(f"[Subject: {subject_name}] Multi-view OK -> {out_dir}")
-        except Exception as e:
+
+        out_dir = process_one_person(
+            left_video_path=left_v,
+            left_pt_path=left_pt,
+            right_video_path=right_v,
+            right_pt_path=right_pt,
+            left_sam3d_body_path=left_sam3d_body,  # 追加: left_sam3d_body
+            right_sam3d_body_path=right_sam3d_body,  # 追加: right_sam3d_body
+            vggt_files=vggt_files,
+            videopose3d_files=videopose3d_files,
+            out_root=out_root,
+            cfg=cfg,
+        )
+        if out_dir is None:
             fail_mv += 1
-            logger.exception(
-                f"[Subject: {subject_name}] Multi-view FAILED with exception: {e}"
-            )
+            logger.error(f"[Subject: {subject_name}] Multi-view FAILED (None out_dir)")
 
     logger.info(f"==== ALL DONE ====\n  Success: {ok_mv}\n  Failed : {fail_mv}")
 

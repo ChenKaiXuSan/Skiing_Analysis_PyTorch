@@ -49,15 +49,15 @@ def main(cfg: DictConfig) -> None:
     video_root = Path(cfg.paths.video_path).resolve()
     pt_root = Path(cfg.paths.pt_path).resolve()
     out_root = Path(cfg.paths.log_path).resolve()
+    inference_output_path = Path(cfg.paths.result_output_path).resolve()
 
     if not video_root.exists():
         raise FileNotFoundError(f"video_path not found: {video_root}")
     if not pt_root.exists():
         raise FileNotFoundError(f"pt_path not found: {pt_root}")
-    if not out_root.exists():
-        raise FileNotFoundError(f"log_path not found: {out_root}")
 
     out_root.mkdir(parents=True, exist_ok=True)
+    inference_output_path.mkdir(parents=True, exist_ok=True)
 
     recursive = bool(cfg.dataset.get("recursive", False))
 
@@ -118,9 +118,9 @@ def main(cfg: DictConfig) -> None:
 
         for vid, pt in zip(vids, pts):
             if vid.stem == "osmo_1":
-                _pairs.append(("left", subject_name, vid, pt))
-            elif vid.stem == "osmo_2":
                 _pairs.append(("right", subject_name, vid, pt))
+            elif vid.stem == "osmo_2":
+                _pairs.append(("left", subject_name, vid, pt))
 
     logger.info(f"Total matched subjects: {len(subjects)}")
 
@@ -134,6 +134,7 @@ def main(cfg: DictConfig) -> None:
             video_path=vid,
             pt_path=pt,
             out_dir=out_root / subject_name / flag,
+            inference_output_path=inference_output_path / subject_name / flag,
             cfg=cfg,
         )
 

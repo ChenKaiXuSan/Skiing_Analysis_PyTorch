@@ -79,7 +79,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "sam3d_body.main",
-      "cwd": "$/workspace/code",
+      "cwd": "/workspace/code",
       "python": "/opt/conda/envs/sam_3d_body/bin/python",
       "console": "integratedTerminal",
       "args": [

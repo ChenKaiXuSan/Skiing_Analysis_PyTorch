@@ -20,8 +20,10 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
+import logging
 import os
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List
 
 import cv2
 import numpy as np
@@ -29,6 +31,9 @@ import numpy as np
 from .sam_3d_body.visualization.renderer import Renderer
 
 LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
+
+
+logger = logging.getLogger(__name__)
 
 
 def save_mesh_results(
@@ -98,3 +103,17 @@ def save_mesh_results(
         print(f"Saved bbox: {os.path.join(save_dir, bbox_filename)}")
 
     return ply_files
+
+
+def save_results(
+    outputs: List[Dict[str, Any]],
+    save_dir: Path,
+) -> None:
+    """Save all results including mesh files and visualizations."""
+
+    # FIXME: 需要修复一下
+    np.savez_compressed(
+        str(save_dir) + "_sam_3d_body_outputs.npz",
+        outputs,
+    )
+    logger.info(f"Saved outputs: {save_dir / f'sam_3d_body_outputs.npz'}")

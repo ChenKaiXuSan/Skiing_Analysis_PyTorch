@@ -3,6 +3,7 @@
 from typing import Dict, Optional, Tuple, Union
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 
 from .utils import draw_text, parse_pose_metainfo
@@ -317,3 +318,93 @@ class SkeletonVisualizer:
                     )
 
         return image
+
+    def draw_skeleton_3d(
+        self,
+        points_3d: np.ndarray,
+        colors: Optional[np.ndarray] = None,
+        link_colors: Optional[np.ndarray] = None,  # 新增参数，用于覆盖默认连接线颜色
+        window_title: str = "3D Skeleton Visualization",
+    ):
+        """
+        使用 Open3D 绘制 3D 关键点和骨架连线。
+
+        Args:
+            points_3d (np.ndarray): N x 3 形状的 NumPy 数组，代表 3D 坐标 (x, y, z)。
+            colors (Optional[np.ndarray]): N x 3 形状的 NumPy 数组，代表每个点的 RGB 颜色 (0.0 到 1.0)。
+            link_colors (Optional[np.ndarray]): M x 3 形状的 NumPy 数组，代表每条连接线的 RGB 颜色 (0.0 到 1.0)。
+            window_title (str): 可视化窗口的标题。
+        """
+        # 1. 初始化 3D 绘图
+        fig = plt.figure(figsize=(8, 8))
+        ax = fig.add_subplot(111, projection="3d")
+        ax.set_title(window_title)
+
+        # 设置坐标轴标签
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+
+        # 确保坐标轴比例一致，避免扭曲
+        max_range = (
+            np.array(
+                [points_3d[:, i].max() - points_3d[:, i].min() for i in range(3)]
+            ).max()
+            / 2.0
+        )
+        mid_x = (points_3d[:, 0].max() + points_3d[:, 0].min()) / 2.0
+        mid_y = (points_3d[:, 1].max() + points_3d[:, 1].min()) / 2.0
+        mid_z = (points_3d[:, 2].max() + points_3d[:, 2].min()) / 2.0
+        ax.set_xlim(mid_x - max_range, mid_x + max_range)
+        ax.set_ylim(mid_y - max_range, mid_y + max_range)
+        ax.set_zlim(mid_z - max_range, mid_z + max_range)
+
+        # 2. 绘制 3D 关键点
+        # Matplotlib 颜色需要是 0.0 到 1.0 的 RGB/RGBA
+        raw_kpt_colors_mp = self.kpt_color
+        # 关键点颜色转换
+        if raw_kpt_colors_mp is not None and not isinstance(raw_kpt_colors_mp, str):
+            # 将颜色转换为 NumPy 数组并归一化到 0.0-1.0 范围
+            kpt_color = np.array(raw_kpt_colors_mp, dtype=np.float32) / 255.0
+
+        # 连线颜色转换
+        raw_link_colors_mp = self.link_color
+        if raw_link_colors_mp is not None and not isinstance(raw_link_colors_mp, str):
+            link_color = np.array(raw_link_colors_mp, dtype=np.float32) / 255.0
+
+        ax.scatter(
+            points_3d[:, 0],
+            points_3d[:, 1],
+            points_3d[:, 2],
+            c=kpt_color if raw_kpt_colors_mp is not None else colors,
+            marker="o",
+            s=self.radius * 10,  # 调整点的大小以便在 3D 中可见
+            alpha=self.alpha,
+        )
+
+        # 3. 绘制 3D 骨架连线
+        if self.skeleton is not None:
+            link_colors_mp = (
+                link_color if raw_link_colors_mp is not None else link_colors
+            )
+
+            for i, (p1_idx, p2_idx) in enumerate(self.skeleton):
+                # 获取连接线的颜色，确保在 0.0-1.0 范围
+                color = link_colors_mp[i % len(link_colors_mp)]  # 循环使用颜色
+
+                # 提取两个点的坐标
+                p1 = points_3d[p1_idx]
+                p2 = points_3d[p2_idx]
+
+                # 绘制连接线
+                ax.plot(
+                    [p1[0], p2[0]],
+                    [p1[1], p2[1]],
+                    [p1[2], p2[2]],
+                    color=color,
+                    linewidth=self.line_width * 2,  # 调整线宽
+                    alpha=self.alpha,
+                )
+
+        # 返回 Figure 对象，Notebook 会自动显示它
+        return fig

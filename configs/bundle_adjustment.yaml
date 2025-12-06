@@ -12,6 +12,7 @@ paths:
   video_path: ${paths.root_path}/side_raw
   vggt_path: ${paths.root_path}/vggt_npy
   videopose3d_path: ${paths.root_path}/videopose3d_npy
+  sam3d_body_path: ${paths.root_path}/sam3d_body_results
 
   log_path: logs/bundle_adjustment/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
@@ -27,4 +28,4 @@ infer:
   gpu: 1
 
 dataset:
-  recursive: false
+  recursive: true
