@@ -30,6 +30,7 @@ infer:
   keep_frames: true
   gpu: 1
   reproj_err: 20
+  hflip: true
 
 runtime:
   verbose: true

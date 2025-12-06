@@ -8,15 +8,15 @@ Author: Kaixu Chen
 Last Modified: 2025-11-25
 """
 
-import os
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from vggt.multi_view_process import process_multi_view_video
+from .multi_view_process import process_multi_view_video
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def main(cfg: DictConfig) -> None:
     # 读取路径
     video_root = Path(cfg.paths.video_path).resolve()
     pt_root = Path(cfg.paths.pt_path).resolve()
-    out_root = Path(cfg.paths.log_path).resolve()
+    log_out_root = Path(cfg.paths.log_path).resolve()
     inference_output_path = Path(cfg.paths.inference_output_path).resolve()
 
     if not video_root.exists():
@@ -66,7 +66,7 @@ def main(cfg: DictConfig) -> None:
     if not pt_root.exists():
         raise FileNotFoundError(f"pt_path not found: {pt_root}")
 
-    out_root.mkdir(parents=True, exist_ok=True)
+    log_out_root.mkdir(parents=True, exist_ok=True)
     inference_output_path.mkdir(parents=True, exist_ok=True)
 
     recursive = bool(cfg.dataset.get("recursive", False))
@@ -148,33 +148,20 @@ def main(cfg: DictConfig) -> None:
     # ---------------------------------------------------------------------- #
     # 顺序执行（无多线程）
     # ---------------------------------------------------------------------- #
-    ok_mv = fail_mv = 0
-
     for subject_name, left_v, right_v, left_pt, right_pt in multi_pairs:
         logger.info(f"[Subject: {subject_name}] Multi-view START")
-        try:
-            out_dir = process_multi_view_video(
-                left_video_path=left_v,
-                left_pt_path=left_pt,
-                right_video_path=right_v,
-                right_pt_path=right_pt,
-                out_root=out_root,
-                inference_output_path=inference_output_path,
-                cfg=cfg,
-            )
-            if out_dir is None:
-                fail_mv += 1
-                logger.error(
-                    f"[Subject: {subject_name}] Multi-view FAILED (None out_dir)"
-                )
-            else:
-                ok_mv += 1
-                logger.info(f"[Subject: {subject_name}] Multi-view OK -> {out_dir}")
-        except Exception as e:
-            fail_mv += 1
-            logger.exception(
-                f"[Subject: {subject_name}] Multi-view FAILED with exception: {e}"
-            )
+        out_dir = process_multi_view_video(
+            left_video_path=left_v,
+            left_pt_path=left_pt,
+            right_video_path=right_v,
+            right_pt_path=right_pt,
+            out_root=log_out_root,
+            inference_output_path=inference_output_path,
+            cfg=cfg,
+        )
+        
+        if out_dir is None:
+            logger.error(f"[Subject: {subject_name}] Multi-view FAILED (None out_dir)")
 
     logger.info("==== ALL DONE ====")
 

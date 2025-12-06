@@ -6,25 +6,24 @@ vggt_video_infer.py
 """
 
 import logging
-import numpy as np
-import torch
-from tqdm import tqdm
-from typing import List, Dict, Optional
-from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-from torchvision.io import write_png
+import cv2
+import numpy as np
+import open3d
+import torch
+from omegaconf import DictConfig
+from tqdm import tqdm
 
+from vggt.load import load_info
 from vggt.reproject import reproject_and_visualize
-from vggt.load import load_info, load_and_preprocess_images
 from vggt.save import save_camera_info
-
 from vggt.triangulate import triangulate_one_frame
-
 from vggt.vggt.infer import CameraHead
+from vggt.vis.pose_visualization import save_stereo_pose_frame, visualize_3d_joints
 
-from vggt.bundle_adjustment.main import run_local_ba
-from vggt.vis.pose_visualization import visualize_3d_joints, save_stereo_pose_frame
+from .vis.skeleton_visualizer import SkeletonVisualizer
 
 logger = logging.getLogger(__name__)
 
@@ -90,15 +89,19 @@ def process_multi_view_video(
     logger.info(f"[Run-MV] {left_video_path} & {right_video_path} → {out_dir} | ")
 
     # * load info from pt and video
-    left_kpts, left_kpt_scores, *_, left_frames = load_info(
-        video_file_path=left_video_path.as_posix(),
-        pt_file_path=left_pt_path.as_posix(),
-        assume_normalized=False,
+    left_kpts, left_kpt_scores, left_bboxes, left_bboxes_scores, left_frames = (
+        load_info(
+            video_file_path=left_video_path.as_posix(),
+            pt_file_path=left_pt_path.as_posix(),
+            assume_normalized=False,
+        )
     )
-    right_kpts, right_kpt_scores, *_, right_frames = load_info(
-        video_file_path=right_video_path.as_posix(),
-        pt_file_path=right_pt_path.as_posix(),
-        assume_normalized=False,
+    right_kpts, right_kpt_scores, right_bboxes, right_bboxes_scores, right_frames = (
+        load_info(
+            video_file_path=right_video_path.as_posix(),
+            pt_file_path=right_pt_path.as_posix(),
+            assume_normalized=False,
+        )
     )
 
     all_frame_raw_x3d = []
@@ -109,6 +112,23 @@ def process_multi_view_video(
     all_frame_C = []
 
     camera_head = CameraHead(cfg, out_dir / "vggt_infer")
+    visualizer = SkeletonVisualizer()
+
+    # rotat the right frame to left frame coordinate
+    if cfg.infer.get("hflip", False):
+        right_frames = torch.stack([torch.flip(frame, [1]) for frame in right_frames])
+        right_kpts = [kp.copy() for kp in right_kpts]
+        for kp in right_kpts:
+            kp[:, 0] = left_frames[0].shape[1] - kp[:, 0]
+        right_bboxes = [box.copy() for box in right_bboxes]
+        for box in right_bboxes:
+            x1, y1, x2, y2 = box
+            box[0] = left_frames[0].shape[1] - x2
+            box[2] = left_frames[0].shape[1] - x1
+    else:
+        right_frames = right_frames
+        right_kpts = right_kpts
+        right_bboxes = right_bboxes
 
     for idx in tqdm(
         range(0, min(len(left_frames), len(right_frames))), desc="Processing frames"
@@ -119,21 +139,40 @@ def process_multi_view_video(
         # save images
         img_dir = out_dir / "raw_frames" / f"frame_{idx:04d}"
         img_dir.mkdir(parents=True, exist_ok=True)
-        write_png(left_frames[idx].permute(2, 0, 1), img_dir / f"left_{idx:04d}.png")
-        write_png(right_frames[idx].permute(2, 0, 1), img_dir / f"right_{idx:04d}.png")
-
-        # infer vggt
-        camera_extrinsics, camera_intrinsics_resized, R, t, C = (
-            camera_head.reconstruct_from_frames(
-                imgs=[
-                    left_frames[idx],
-                    right_frames[idx],
-                ],
-                frame_id=idx,
-            )
+        draw_kpt_left = visualizer.draw_skeleton_2d(
+            image=left_frames[idx].numpy(),
+            keypoints=left_kpts[idx],
+        )
+        draw_kpt_right = visualizer.draw_skeleton_2d(
+            image=right_frames[idx].numpy(),
+            keypoints=right_kpts[idx],
         )
 
-        # TODO: 算repro和可视化的代码应该放到外面来
+        cv2.imwrite(
+            (img_dir / f"left_{idx:04d}_kpt.png").as_posix(),
+            draw_kpt_left,
+        )
+        cv2.imwrite(
+            (img_dir / f"right_{idx:04d}_kpt.png").as_posix(),
+            draw_kpt_right,
+        )
+
+        # infer vggt
+        (
+            camera_extrinsics,
+            camera_intrinsics_resized,
+            R,
+            t,
+            C,
+            world_points_from_depth,
+        ) = camera_head.reconstruct_from_frames(
+            imgs=[
+                left_frames[idx],
+                right_frames[idx],
+            ],
+            frame_id=idx,
+        )
+
         x3d, reprojet_err = triangulate_one_frame(
             kptL=left_kpts[idx],
             kptR=right_kpts[idx],
@@ -144,12 +183,19 @@ def process_multi_view_video(
             ),
             R=np.stack([R[0], R[1]], axis=0),
             T=np.stack([t[0], t[1]], axis=0),
-            save_dir=out_dir / "triangulation" / f"frame_{idx:04d}",
+            save_dir=out_dir / "triangulation" / "raw" / f"frame_{idx:04d}",
             dist=None,
             visualize_3d=True,
             frame_num=idx,
         )
 
+        # visualize 2d keypoints and save
+        visualizer.draw_camera_with_skeleton(
+            R=np.stack([R[0], R[1]], axis=0),
+            T=np.stack([t[0], t[1]], axis=0),
+            keypoints_3d=x3d,
+            save_dir=out_dir / "skeleton_camera_viz" / f"frame_{idx:04d}.png",
+        )
         # write reprojetion error to log
         with open(out_dir / "raw_reprojection_error.txt", "a") as f:
             f.write(f"Frame {idx:04d} Reprojection Error (in pixels):\n")
@@ -157,6 +203,59 @@ def process_multi_view_video(
                 if isinstance(v, np.ndarray):
                     continue
                 f.write(f"  {k}: {v}\n")
+
+        # scale bboxes to match the resized image size
+        source_size = left_frames.shape[1:3]  # (H,W)
+        target_size = world_points_from_depth.shape[0:2]  # (H,W)
+
+        left_bboxes[idx] = scale_bbox(
+            bbox=left_bboxes[idx],
+            source_size=source_size,
+            target_size=target_size,
+        )
+        right_bboxes[idx] = scale_bbox(
+            bbox=right_bboxes[idx],
+            source_size=source_size,
+            target_size=target_size,
+        )
+        # 根据bbox大小执行点云配准
+        source_point_aligned, transformation = ICP_with_bbox(
+            source_points=world_points_from_depth[0],
+            target_points=world_points_from_depth[1],
+            source_bbox=left_bboxes[idx],
+            target_bbox=right_bboxes[idx],
+        )
+
+        # 更新R和t
+        R_update = transformation[:3, :3]
+        t_update = transformation[:3, 3]
+
+        R[1] = R_update @ R[1]
+        t[1] = R_update @ t[1] + t_update
+
+        x3d, reprojet_err = triangulate_one_frame(
+            kptL=left_kpts[idx],
+            kptR=right_kpts[idx],
+            frame_L=left_frames[idx].numpy(),
+            frame_R=right_frames[idx].numpy(),
+            K=np.stack(
+                [camera_intrinsics_resized[0], camera_intrinsics_resized[1]], axis=0
+            ),
+            R=np.stack([R[0], R[1]], axis=0),
+            T=np.stack([t[0], t[1]], axis=0),
+            save_dir=out_dir / "triangulation" / "update" / f"frame_{idx:04d}",
+            dist=None,
+            visualize_3d=True,
+            frame_num=idx,
+        )
+
+        # visualize 2d keypoints and save
+        visualizer.draw_camera_with_skeleton(
+            R=np.stack([R[0], R[1]], axis=0),
+            T=np.stack([t[0], t[1]], axis=0),
+            keypoints_3d=x3d,
+            save_dir=out_dir / "skeleton_camera_viz" / f"update_frame_{idx:04d}.png",
+        )
 
         all_frame_raw_x3d.append(x3d)
         all_frame_camera_extrinsics.append(camera_extrinsics)
@@ -175,39 +274,164 @@ def process_multi_view_video(
         all_frame_C=all_frame_C,
     )
 
-    R_init = np.array(all_frame_R)  # (T,C,3,3)
-    t_init = np.array(all_frame_t)  # (T,C,3)
-    X3d_init = np.array(all_frame_raw_x3d)  # (T,J,3)
-    x2d = np.array(
-        [
-            np.stack([left_kpts[i], right_kpts[i]], axis=0)
-            for i in range(len(all_frame_raw_x3d))
-        ]
-    )  # (T,C,J,2)
-    conf2d = np.array(
-        [
-            np.stack([left_kpt_scores[i], right_kpt_scores[i]], axis=0)
-            for i in range(len(all_frame_raw_x3d))
-        ]
-    )  # (T,C,J)
+    # R_init = np.array(all_frame_R)  # (T,C,3,3)
+    # t_init = np.array(all_frame_t)  # (T,C,3)
+    # X3d_init = np.array(all_frame_raw_x3d)  # (T,J,3)
+    # x2d = np.array(
+    #     [
+    #         np.stack([left_kpts[i], right_kpts[i]], axis=0)
+    #         for i in range(len(all_frame_raw_x3d))
+    #     ]
+    # )  # (T,C,J,2)
+    # conf2d = np.array(
+    #     [
+    #         np.stack([left_kpt_scores[i], right_kpt_scores[i]], axis=0)
+    #         for i in range(len(all_frame_raw_x3d))
+    #     ]
+    # )  # (T,C,J)
 
     # mode = cfg.bundle_adjustment.get("mode", "pose_only")
-    for mode in ["pose_only", "pose_cam_t", "full"]:
-        bundle_adjustment(
-            cfg=cfg,
-            out_dir=out_dir,
-            R_init=R_init,
-            t_init=t_init,
-            X3d_init=X3d_init,
-            x2d=x2d,
-            conf2d=conf2d,
-            all_frame_camera_intrinsics=all_frame_camera_intrinsics,
-            left_frames=left_frames,
-            right_frames=right_frames,
-            left_kpts=left_kpts,
-            right_kpts=right_kpts,
-            mode=mode,
-        )
+    # for mode in ["pose_only", "pose_cam_t", "full"]:
+    #     bundle_adjustment(
+    #         cfg=cfg,
+    #         out_dir=out_dir,
+    #         R_init=R_init,
+    #         t_init=t_init,
+    #         X3d_init=X3d_init,
+    #         x2d=x2d,
+    #         conf2d=conf2d,
+    #         all_frame_camera_intrinsics=all_frame_camera_intrinsics,
+    #         left_frames=left_frames,
+    #         right_frames=right_frames,
+    #         left_kpts=left_kpts,
+    #         right_kpts=right_kpts,
+    #         mode=mode,
+    #     )
+
+
+def scale_bbox(
+    bbox: List[float],
+    source_size: Tuple[int, int],
+    target_size: Tuple[int, int],
+) -> List[float]:
+    """
+    根据源图像和目标图像的尺寸比例，缩放边界框坐标。
+
+    bbox: [x1, y1, x2, y2]
+    source_size: (height, width)
+    target_size: (height, width)
+
+    返回: 缩放后的边界框 [x1, y1, x2, y2]
+    """
+    src_h, src_w = source_size
+    tgt_h, tgt_w = target_size
+
+    scale_x = tgt_w / src_w
+    scale_y = tgt_h / src_h
+
+    x1, y1, x2, y2 = bbox
+    x1_scaled = x1 * scale_x
+    y1_scaled = y1 * scale_y
+    x2_scaled = x2 * scale_x
+    y2_scaled = y2 * scale_y
+
+    return [x1_scaled, y1_scaled, x2_scaled, y2_scaled]
+
+
+def ICP_with_bbox(
+    source_points: np.ndarray,
+    target_points: np.ndarray,
+    source_bbox: List[float],
+    target_bbox: List[float],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    使用 ICP 对齐源点云到目标点云，基于给定的边界框进行裁剪以提高配准精度。
+    最终返回整个原始源点云的对齐结果。
+
+    source_points: (N, 3) 原始源点云
+    target_points: (M, 3) 目标点云
+    source_bbox: [x1, y1, x2, y2]
+    target_bbox: [x1, y1, x2, y2]
+
+    返回: (对齐后的整个源点云 (N, 3), 4x4 变换矩阵)
+    """
+    # TODO: 这里的剪裁逻辑可以根据实际需求调整
+    # 确保 BBox 是整数 (像素坐标)
+    sx1, sy1, sx2, sy2 = map(int, source_bbox)
+    tx1, ty1, tx2, ty2 = map(int, target_bbox)
+
+    # --- 1. 裁剪点云用于 ICP (基于图像索引) ---
+
+    # ⚠️ 修正：正确的 NumPy 索引顺序是 [y_min:y_max, x_min:x_max]
+    # 裁剪 (H, W, 3) 数组
+    # cropped_source_region = source_points[sy1:sy2, sx1:sx2, :]
+    # cropped_target_region = target_points[ty1:ty2, tx1:tx2, :]
+    cropped_source_region = source_points
+    cropped_target_region = target_points
+
+    # 展平为 N x 3 的点集
+    cropped_source_points_N3 = cropped_source_region.reshape(-1, 3)
+    cropped_target_points_N3 = cropped_target_region.reshape(-1, 3)
+
+    # 过滤掉无效点 (Z=0, NaN, 或原点附近的点)
+    def filter_and_validate(points_N3):
+        # 过滤掉范数小于 1e-6 的点 (通常表示无效点 [0, 0, 0])
+        valid_mask = np.linalg.norm(points_N3, axis=1) > 1e-6
+        return points_N3[valid_mask]
+
+    final_source_points = filter_and_validate(cropped_source_points_N3)
+    final_target_points = filter_and_validate(cropped_target_points_N3)
+
+    if len(final_source_points) < 50 or len(final_target_points) < 50:
+        # 如果点太少，返回零变换并给出警告 (阈值设为 50，可调整)
+        print("警告: 裁剪后的有效点太少，跳过 ICP 配准。")
+        return source_points.reshape(-1, 3), np.eye(4)
+
+    # 转换为 Open3D 对象
+    source_pc_cropped = open3d.geometry.PointCloud()
+    source_pc_cropped.points = open3d.utility.Vector3dVector(final_source_points)
+
+    target_pc_cropped = open3d.geometry.PointCloud()
+    target_pc_cropped.points = open3d.utility.Vector3dVector(final_target_points)
+
+    # --- 2. 执行 G-ICP (Point-to-Plane) 配准 ---
+
+    threshold = 0.05
+    trans_init = np.eye(4)
+
+    # ⚠️ 必须计算法线才能使用 PointToPlane
+    # 设置合理的搜索半径 (radius)
+    search_radius = 0.05
+    source_pc_cropped.estimate_normals(
+        search_param=open3d.geometry.KDTreeSearchParamRadius(radius=search_radius)
+    )
+    target_pc_cropped.estimate_normals(
+        search_param=open3d.geometry.KDTreeSearchParamRadius(radius=search_radius)
+    )
+
+    reg_result = open3d.pipelines.registration.registration_icp(
+        source_pc_cropped,
+        target_pc_cropped,
+        threshold,
+        trans_init,
+        open3d.pipelines.registration.TransformationEstimationPointToPlane(),
+        open3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=200),
+    )
+
+    transformation = reg_result.transformation
+
+    # --- 3. 应用变换到整个原始点云 ---
+
+    R = transformation[:3, :3]
+    t = transformation[:3, 3]
+
+    # 将原始 (H, W, 3) 展平为 (N, 3) 进行矩阵运算
+    P_original_N3 = source_points.reshape(-1, 3)
+
+    # 计算公式: P_aligned = R @ P_original.T + t
+    source_points_aligned = (R @ P_original_N3.T).T + t
+
+    return source_points_aligned, transformation
 
 
 def bundle_adjustment(

@@ -20,6 +20,7 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
+from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import cv2
@@ -261,8 +262,8 @@ class SkeletonVisualizer:
 
         # loop for each person
         for cur_keypoints in keypoints:
-            kpts = cur_keypoints[:, :-1]
-            score = cur_keypoints[:, -1]
+            kpts = cur_keypoints
+            score = np.ones_like(kpts[:, 0])
 
             if self.kpt_color is None or isinstance(self.kpt_color, str):
                 kpt_color = [self.kpt_color] * len(kpts)
@@ -320,7 +321,7 @@ class SkeletonVisualizer:
                         image,
                         pos1,
                         pos2,
-                        color,
+                        2,  # FIXME: color was missing here
                         thickness=self.line_width,
                     )
 
@@ -342,7 +343,7 @@ class SkeletonVisualizer:
                         image,
                         (int(kpt[0]), int(kpt[1])),
                         int(self.radius),
-                        color,
+                        0,  # color,
                         -1,
                     )
                 else:
@@ -350,7 +351,7 @@ class SkeletonVisualizer:
                         image.copy(),
                         (int(kpt[0]), int(kpt[1])),
                         int(self.radius),
-                        color,
+                        0,  # color,
                         -1,
                     )
                     image = cv2.addWeighted(
@@ -358,17 +359,15 @@ class SkeletonVisualizer:
                     )
 
                 if show_kpt_idx:
-                    kpt[0] += self.radius
-                    kpt[1] -= self.radius
-                    image = draw_text(
+                    cv2.putText(
                         image,
                         str(kid),
-                        kpt,
-                        image_size=(img_w, img_h),
-                        color=color,
-                        font_size=self.radius * 3,
-                        vertical_alignment="bottom",
-                        horizontal_alignment="center",
+                        (int(kpt[0]), int(kpt[1])),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4,
+                        (255, 255, 255),
+                        1,
+                        lineType=cv2.LINE_AA,
                     )
 
         return image
@@ -448,18 +447,12 @@ class SkeletonVisualizer:
 
     def draw_camera_with_skeleton(
         self,
-        ax: plt.Axes,
         R: np.ndarray,
         T: np.ndarray,
         keypoints_3d: np.ndarray,
         K: np.ndarray = K,
         image_size: Tuple[int, int] = (1920, 1080),
-        axis_len: float = 0.1,
-        frustum_depth: float = 0.1,
-        label: Optional[str] = None,
-        ray_scale_mode: Literal["depth", "focal"] = "depth",
-        linewidths: Dict[str, float] = None,
-        frustum_alpha: float = 1.0,
+        save_dir: Path = Path("skeleton_camera_viz.png"),
         window_title: str = "3D Camera and Skeleton Visualization",
     ) -> np.ndarray:
         """
@@ -475,22 +468,32 @@ class SkeletonVisualizer:
         ----
         C_plt : (3,) 相机中心（已映射到 Matplotlib 世界系）
         """
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection="3d")
+
         C_plt = self.draw_camera(
-            ax,
-            R,
-            T,
-            K,
-            image_size,
-            axis_len,
-            frustum_depth,
-            label,
-            ray_scale_mode,
-            linewidths,
-            frustum_alpha,
+            ax=ax,
+            R=R[0],
+            T=T[0],
+            image_size=image_size,
+            label="left cam",
         )
+
+        C_plt = self.draw_camera(
+            ax=ax,
+            R=R[1],
+            T=T[1],
+            image_size=image_size,
+            label="right cam",
+        )
+
         self.draw_skeleton_3d(
-            ax,
-            keypoints_3d,
-            window_title,
+            ax=ax,
+            points_3d=keypoints_3d,
+            window_title=window_title,
         )
-        return C_plt
+
+        # save figure
+        save_dir.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_dir)
+        plt.close(fig)

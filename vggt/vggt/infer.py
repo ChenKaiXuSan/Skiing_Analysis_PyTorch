@@ -198,6 +198,9 @@ class CameraHead:
         camera_extrinsics = result_info["preds"]["extrinsic"]
         camera_intrinsics = result_info["preds"]["intrinsic"]
         R, t, C = self.extrinsic_to_RT(camera_extrinsics)
+        world_points_from_depth = result_info["preds"][
+            "world_points_from_depth"
+        ]  # (N,3)
 
         camera_intrinsics_resized = []
         for i in range(len(camera_intrinsics)):
@@ -209,4 +212,4 @@ class CameraHead:
                 )
             )
 
-        return camera_extrinsics, camera_intrinsics_resized, R, t, C
+        return camera_extrinsics, camera_intrinsics_resized, R, t, C, world_points_from_depth

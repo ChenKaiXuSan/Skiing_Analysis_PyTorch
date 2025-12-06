@@ -51,8 +51,6 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "args": [
-        "runtime.run_multi_view=true",
-        "runtime.debug=true",
         "infer.gpu=0",
       ]
     },
