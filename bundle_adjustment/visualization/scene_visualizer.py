@@ -7,6 +7,11 @@ Created Date: Sunday December 7th 2025
 Author: Kaixu Chen
 -----
 Comment:
+以人物为世界中心
+左相机
+右相机是按照刚体对其准的
+
+相机看向人物中心，根据focal_length计算FOV
 
 Have a good code time :)
 -----
@@ -19,15 +24,23 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
-# Copyright (c) Meta Platforms, Inc. and affiliates.
 
 from typing import Dict, Optional, Tuple, Union
 
-import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ..fuse.fuse import TORSO_IDX
+
 from .utils import draw_text, parse_pose_metainfo
+
+# sam 3d body 的关键关节索引（你已经给定）
+# NECK = 69
+# L_HIP, R_HIP = 9, 10
+# L_SHO, R_SHO = 5, 6
+
+# # 用于估计刚体变换的“躯干点”
+# TORSO_IDX = [NECK, L_HIP, R_HIP, L_SHO, R_SHO]
 
 
 class SceneVisualizer:
@@ -108,6 +121,44 @@ class SceneVisualizer:
             b = frustum_pts[idx[i + 1]]
             ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]], color=color)
 
+    def draw_camera_axes(self, ax, C, R, length=0.1):
+        """
+        在 3D 里画相机坐标系的三个轴
+        C : (3,) 相机中心（世界系）
+        R : (3,3) 相机旋转矩阵（世界系到相机系）
+        length : 轴的长度
+        """
+        C = np.asarray(C)
+        R = np.asarray(R)
+
+        # 相机坐标系的三个轴
+        x_axis = R[:, 0] * length
+        y_axis = R[:, 1] * length
+        z_axis = R[:, 2] * length
+
+        # 画出三个轴
+        ax.plot(
+            [C[0], C[0] + x_axis[0]],
+            [C[1], C[1] + x_axis[1]],
+            [C[2], C[2] + x_axis[2]],
+            color="r",
+            lw=self.line_width,
+        )
+        ax.plot(
+            [C[0], C[0] + y_axis[0]],
+            [C[1], C[1] + y_axis[1]],
+            [C[2], C[2] + y_axis[2]],
+            color="g",
+            lw=self.line_width,
+        )
+        ax.plot(
+            [C[0], C[0] + z_axis[0]],
+            [C[1], C[1] + z_axis[1]],
+            [C[2], C[2] + z_axis[2]],
+            color="b",
+            lw=self.line_width,
+        )
+
     def calculate_fov_deg(self, focal_length, image_dimension):
         """
         焦点距離 (f) と画像の次元 (W または H) から画角 (FOV) を計算する。
@@ -153,8 +204,9 @@ class SceneVisualizer:
         kpts_world,
         C_L_world,
         C_R_world,
-        focal_length: np.ndarray,
-        frustum_depth=1.0,
+        left_focal_length: np.ndarray,
+        right_focal_length: np.ndarray,
+        frustum_depth=0.5,
         title="Person-centered world with two cameras",
     ):
         """
@@ -229,18 +281,32 @@ class SceneVisualizer:
 
         C_L_world = self.convert_opencv_matplotlib(C_L_world, flag="cam")
 
+        # 相机中心需要平移
         ax.scatter(
             C_L_world[0], C_L_world[1], C_L_world[2], marker="^", s=80, color="r"
         )
         ax.text(C_L_world[0], C_L_world[1], C_L_world[2], "Cam L", color="r")
 
-        # 朝向：默认看向人物原点
-        dL = -C_L_world
+        # 朝向：根据TORSO_IDX计算人物中心，看向人物原点
+        person_center = kpts_world[TORSO_IDX].mean(axis=0)
+
+        dL = person_center - C_L_world
         dL = dL / (np.linalg.norm(dL) + 1e-8)
+
+        # dL = -C_L_world
+        # dL = dL / (np.linalg.norm(dL) + 1e-8)
+        fov_deg_L = self.calculate_fov_deg(
+            focal_length=left_focal_length, image_dimension=1080
+        )
         frustum_L = self.compute_frustum_points(
-            C_L_world, dL, fov_deg=fov_deg, depth=frustum_depth
+            C_L_world, dL, fov_deg=fov_deg_L, depth=frustum_depth
         )
         self.draw_frustum(ax, C_L_world, frustum_L, color="r")
+
+        self.draw_camera_axes(ax, C_L_world, np.eye(3), length=0.1)
+
+        ax.scatter(C_L_world[0], C_L_world[1], C_L_world[2], s=60)
+        ax.text(C_L_world[0], C_L_world[1], C_L_world[2], "Cam L")
 
         # --- 3. 右相机 ---
 
@@ -251,12 +317,24 @@ class SceneVisualizer:
         )
         ax.text(C_R_world[0], C_R_world[1], C_R_world[2], "Cam R", color="b")
 
-        dR = -C_R_world
+        # 朝向：根据TORSO_IDX计算人物中心，看向人物原点
+        dR = person_center - C_R_world
         dR = dR / (np.linalg.norm(dR) + 1e-8)
+
+        # dR = -C_R_world
+        # dR = dR / (np.linalg.norm(dR) + 1e-8)
+        fov_deg_R = self.calculate_fov_deg(
+            focal_length=right_focal_length, image_dimension=1080
+        )
         frustum_R = self.compute_frustum_points(
-            C_R_world, dR, fov_deg=fov_deg, depth=frustum_depth
+            C_R_world, dR, fov_deg=fov_deg_R, depth=frustum_depth
         )
         self.draw_frustum(ax, C_R_world, frustum_R, color="b")
+
+        self.draw_camera_axes(ax, C_R_world, np.eye(3), length=0.1)
+
+        ax.scatter(C_L_world[0], C_L_world[1], C_L_world[2], s=60)
+        ax.text(C_L_world[0], C_L_world[1], C_L_world[2], "Cam L")
 
         # --- 4. 视线（相机到人）的连线（可选） ---
         ax.plot(

@@ -17,7 +17,7 @@ def _center_scale_sam(
     neck_idx: int = NECK,
     l_hip_idx: int = L_HIP,
     r_hip_idx: int = R_HIP,
-) -> Tuple[np.ndarray, float]:
+) -> Tuple[np.ndarray, float, np.ndarray]:
     """
     以 pelvis(左右髋中点) 为原点，按 pelvis–neck 距离归一。
 
@@ -31,11 +31,14 @@ def _center_scale_sam(
     pelvis = 0.5 * (X[l_hip_idx] + X[r_hip_idx])
     neck = X[neck_idx]
 
+    # center at pelvis
     X -= pelvis
+
+    # scale by pelvis–neck distance
     s = np.linalg.norm(neck - pelvis)
     s = s if s > 1e-8 else 1.0
     X /= s
-    return X, s
+    return X, s, pelvis
 
 
 def _fuse_two(
@@ -89,9 +92,10 @@ def _fuse_two(
             out[j] = (wL[j] * Lj + wR[j] * Rj) / (wL[j] + wR[j] + 1e-9)
     return out
 
+
 def rigid_transform_3D(
-    target: np.ndarray,          # (J,3) 或 (T,J,3)  左视角
-    source: np.ndarray,          # (J,3) 或 (T,J,3)  右视角
+    target: np.ndarray,  # (J,3) 或 (T,J,3)  左视角
+    source: np.ndarray,  # (J,3) 或 (T,J,3)  右视角
     tau: float = 0.08,
     allow_scale: bool = False,
     wL: Optional[Union[np.ndarray, float]] = None,  # (J,) 或 (T,J) 或 None
@@ -121,7 +125,9 @@ def rigid_transform_3D(
     assert L.shape == R.shape and L.shape[-1] == 3, "输入形状应一致，且为(*,J,3)"
 
     T, J, _ = L.shape
-    assert max(TORSO_IDX) < J, f"躯干索引超出关节数量: max(TORSO_IDX)={max(TORSO_IDX)}, J={J}"
+    assert max(TORSO_IDX) < J, (
+        f"躯干索引超出关节数量: max(TORSO_IDX)={max(TORSO_IDX)}, J={J}"
+    )
 
     fused_seq = np.empty_like(L)
 
@@ -156,8 +162,8 @@ def rigid_transform_3D(
         Rt = R[t].copy()
 
         # 1) 分别规范化（pelvis 原点 + pelvis–neck 归一）
-        Lt_n, _ = _center_scale_sam(Lt)
-        Rt_n, _ = _center_scale_sam(Rt)
+        Lt_n, _, pelvis_L = _center_scale_sam(Lt)
+        Rt_n, _, pelvis_R = _center_scale_sam(Rt)
 
         # 2) 用躯干点估计 Rt_n → Lt_n 的相似变换
         torso_L, torso_R = Lt_n[TORSO_IDX], Rt_n[TORSO_IDX]
@@ -189,7 +195,7 @@ def rigid_transform_3D(
         )
 
         # 4) 融合后再次统一到 pelvis 原点 + pelvis–neck 归一
-        fused, _ = _center_scale_sam(fused)
+        fused, *_ = _center_scale_sam(fused)
         fused_seq[t] = fused
 
         # 5) 诊断信息
@@ -198,6 +204,8 @@ def rigid_transform_3D(
             fl = float(np.linalg.norm(fused - Lt_n, axis=-1).mean())
             fr = float(np.linalg.norm(fused - Rt_n, axis=-1).mean())
             gain = lr_before - 0.5 * (fl + fr)
+            left_centering = pelvis_L
+            right_centering = pelvis_R
 
             diag["per_frame"].append(
                 {
@@ -209,6 +217,8 @@ def rigid_transform_3D(
                     "s": float(s_hat),
                     "R": R_hat.copy(),
                     "t": t_hat.copy(),
+                    "left_centering": left_centering,
+                    "right_centering": right_centering,
                 }
             )
             if gain < 0:

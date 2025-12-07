@@ -216,7 +216,7 @@ def main(cfg: DictConfig) -> None:
             right_sam3d_body_path=right_sam3d_body,  # 追加: right_sam3d_body
             vggt_files=vggt_files,
             videopose3d_files=videopose3d_files,
-            out_root=out_root,
+            out_root=out_root / subject_name,
             cfg=cfg,
         )
 

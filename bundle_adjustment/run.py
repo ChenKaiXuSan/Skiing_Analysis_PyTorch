@@ -21,10 +21,9 @@ Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.c
 from pathlib import Path
 from typing import List, Optional
 
-import numpy as np
-import torch
-import torch.nn as nn
 from omegaconf import DictConfig
+
+from tqdm import tqdm
 
 from .fuse.fuse import rigid_transform_3D
 from .load import (
@@ -43,6 +42,7 @@ from .loss import (
 from .metadata.mhr70 import pose_info as mhr70_pose_info
 from .visualization.scene_visualizer import SceneVisualizer
 from .visualization.skeleton_visualizer import SkeletonVisualizer
+from .visualization.merge import merge_frame_to_video
 
 
 def setup_visualizer():
@@ -120,9 +120,9 @@ def process_one_person(
     # videopose3d_res = load_videopose3d_results(videopose3d_files)
     # vggt_res = load_vggt_results(vggt_files)
 
-    for frame_idx in range(len(left_sam3d_body_res)):
-        out_dir = out_root / f"frame_{frame_idx:04d}"
-        out_dir.mkdir(parents=True, exist_ok=True)
+    for frame_idx in tqdm(range(len(left_sam3d_body_res)), desc="Processing frames"):
+        # if frame_idx > 60:
+        #     break
 
         process_frame(
             left_sam3d_body_res=left_sam3d_body_res,
@@ -130,8 +130,19 @@ def process_one_person(
             frame_idx=frame_idx,
             skeleton_visualizer=skeleton_visualizer,
             scene_visualizer=scene_visualizer,
-            out_root=out_dir,
+            out_root=out_root,
         )
+
+    # merge frame to video if needed
+    merge_frame_to_video(
+        save_path=out_root,
+        flag="fused",
+    )
+
+    merge_frame_to_video(
+        save_path=out_root,
+        flag="scene",
+    )
 
 
 def process_frame(
@@ -142,7 +153,6 @@ def process_frame(
     scene_visualizer: SceneVisualizer,
     out_root: Path,
 ):
-    
     # 模拟 Ground Truth (Target B)
 
     left_kpt_3d = left_sam3d_body_res[frame_idx]["pred_keypoints_3d"]
@@ -150,22 +160,17 @@ def process_frame(
     C_L_world = -left_sam3d_body_res[frame_idx]["pred_cam_t"]
     C_R_person = -right_sam3d_body_res[frame_idx]["pred_cam_t"]
 
-    left_kpt_3d_n = left_kpt_3d
-    right_kpt_3d_n = right_kpt_3d
-
     left_focal_len = left_sam3d_body_res[frame_idx]["focal_length"]
     right_focal_len = right_sam3d_body_res[frame_idx]["focal_length"]
 
+    # TODO: 因为相机的坐标系和kpt的坐标系需要同时移动，所以规范化的代码需要在外面
     fused, diag = rigid_transform_3D(
-        target=left_kpt_3d_n,
-        source=right_kpt_3d_n,
+        target=left_kpt_3d,
+        source=right_kpt_3d,
         wL=None,
         wR=None,
         return_diagnostics=True,
     )
-
-    # kpts3d_left: (J,3)   左视角的 3D kpt（已经以骨盆对齐）
-    # pred_cam_t_left, pred_cam_t_right: (3,)
 
     # 世界系 = 左人系
     # s, R_RL, t_RL: 用 Umeyama 求出的 右→左 相似变换
@@ -175,13 +180,20 @@ def process_frame(
         diag["per_frame"][0]["t"],
     )
 
+    left_centering = diag["per_frame"][0]["left_centering"]
+    right_centering = diag["per_frame"][0]["right_centering"]
+
     # sam 3d预测的，左、右相机中心
     # 这里的任务需要把右相机从右人系，变换到世界系（左人系）
-    C_L_world = C_L_world  # 左世界系
-    C_R_person = C_R_person  # 右人系
-    C_R_world = s * (R_RL @ C_R_person) + t_RL  # 右世界系
-    # * 右相机根据右人系坐标 + 右→左的相似变换，得到右世界系坐标
 
+    # centering correction，因为kpt进行了中心化，所以相机在渲染时也要相应调整
+    C_L_world -= left_centering
+    C_R_person -= right_centering
+
+    # * 右相机根据右人系坐标 + 右→左的相似变换，得到右世界系坐标
+    C_R_world = s * (R_RL @ C_R_person) + t_RL  # 右世界系
+
+    # ---------- 画骨架图 ----------
     kpts_world = fused  # 直接把左视角的人当作世界里的骨架
 
     plt_skeleton = skeleton_visualizer.draw_skeleton_3d(kpts_world)
@@ -189,10 +201,19 @@ def process_frame(
     out_skeleton = out_root / "fused"
     out_skeleton.mkdir(parents=True, exist_ok=True)
 
-    plt_skeleton.savefig(out_skeleton / "fused_world_skeleton.png", dpi=300)
-    plt_scene = scene_visualizer.draw_scene(kpts_world, C_L_world, C_R_world, focal_length=left_focal_len)
+    plt_skeleton.savefig(out_skeleton / f"{frame_idx}.png", dpi=300)
+
+    # ---------- 画场景图 ----------
+    # TODO: 相机的位置还是有问题，会出现飘逸现象，需要进一步调试
+    plt_scene = scene_visualizer.draw_scene(
+        kpts_world,
+        C_L_world,
+        C_R_world,
+        left_focal_length=left_focal_len,
+        right_focal_length=right_focal_len,
+    )
 
     out_scene = out_root / "scene"
     out_scene.mkdir(parents=True, exist_ok=True)
 
-    plt_scene.savefig(out_scene / "fused_world_scene.png", dpi=300)
+    plt_scene.savefig(out_scene / f"{frame_idx}.png", dpi=300)
