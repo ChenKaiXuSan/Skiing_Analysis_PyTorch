@@ -125,10 +125,9 @@ def process_one_person(
         out_dir.mkdir(parents=True, exist_ok=True)
 
         process_frame(
-            left_kpt_3d=left_sam3d_body_res[frame_idx]["pred_keypoints_3d"],
-            right_kpt_3d=right_sam3d_body_res[frame_idx]["pred_keypoints_3d"],
-            C_L_world=-left_sam3d_body_res[frame_idx]["pred_cam_t"],
-            C_R_person=-right_sam3d_body_res[frame_idx]["pred_cam_t"],
+            left_sam3d_body_res=left_sam3d_body_res,
+            right_sam3d_body_res=right_sam3d_body_res,
+            frame_idx=frame_idx,
             skeleton_visualizer=skeleton_visualizer,
             scene_visualizer=scene_visualizer,
             out_root=out_dir,
@@ -136,17 +135,26 @@ def process_one_person(
 
 
 def process_frame(
-    left_kpt_3d: np.ndarray,
-    right_kpt_3d: np.ndarray,
-    C_L_world: np.ndarray,
-    C_R_person: np.ndarray,
+    left_sam3d_body_res,
+    right_sam3d_body_res,
+    frame_idx,
     skeleton_visualizer: SkeletonVisualizer,
     scene_visualizer: SceneVisualizer,
     out_root: Path,
 ):
+    
     # 模拟 Ground Truth (Target B)
+
+    left_kpt_3d = left_sam3d_body_res[frame_idx]["pred_keypoints_3d"]
+    right_kpt_3d = right_sam3d_body_res[frame_idx]["pred_keypoints_3d"]
+    C_L_world = -left_sam3d_body_res[frame_idx]["pred_cam_t"]
+    C_R_person = -right_sam3d_body_res[frame_idx]["pred_cam_t"]
+
     left_kpt_3d_n = left_kpt_3d
     right_kpt_3d_n = right_kpt_3d
+
+    left_focal_len = left_sam3d_body_res[frame_idx]["focal_length"]
+    right_focal_len = right_sam3d_body_res[frame_idx]["focal_length"]
 
     fused, diag = rigid_transform_3D(
         target=left_kpt_3d_n,
@@ -182,7 +190,7 @@ def process_frame(
     out_skeleton.mkdir(parents=True, exist_ok=True)
 
     plt_skeleton.savefig(out_skeleton / "fused_world_skeleton.png", dpi=300)
-    plt_scene = scene_visualizer.draw_scene(kpts_world, C_L_world, C_R_world)
+    plt_scene = scene_visualizer.draw_scene(kpts_world, C_L_world, C_R_world, focal_length=left_focal_len)
 
     out_scene = out_root / "scene"
     out_scene.mkdir(parents=True, exist_ok=True)

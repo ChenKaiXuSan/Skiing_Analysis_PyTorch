@@ -108,13 +108,52 @@ class SceneVisualizer:
             b = frustum_pts[idx[i + 1]]
             ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]], color=color)
 
+    def calculate_fov_deg(self, focal_length, image_dimension):
+        """
+        焦点距離 (f) と画像の次元 (W または H) から画角 (FOV) を計算する。
+
+        Args:
+            focal_length (float): 焦点距離 (ピクセル単位)
+            image_dimension (int): 計算したい方向の画像の幅または高さ (ピクセル単位)
+
+        Returns:
+            float: 画角 (度数 / deg)
+        """
+        # 式: 2 * arctan((Dimension / 2) / focal_length)
+        fov_rad = 2 * np.arctan(image_dimension / (2 * focal_length))
+
+        # ラジアンを度数に変換
+        fov_deg = np.rad2deg(fov_rad)
+
+        return fov_deg
+
+    def convert_opencv_matplotlib(self, opencv_point: np.ndarray, flag: str):
+        # ------- OpenCV(world) -> Matplotlib(world) 线性映射 -------
+        # x 保持；z(前) -> y(前)；-y(上) -> z(上)
+        M = np.array(
+            [
+                [1.0, 0.0, 0.0],  # x -> x
+                [0.0, 0.0, 1.0],  # z -> y
+                [0.0, -1.0, 0.0],  # -y -> z
+            ],
+            dtype=float,
+        )
+
+        # 将点从opencv > matplotlib
+        if flag == "cam":
+            matplotlib_point = (M @ opencv_point).reshape(3)
+        elif flag == "person":
+            matplotlib_point = (M @ opencv_point.T).T
+
+        return matplotlib_point
+
     # ---------- 主函数：画人物 + 左右相机 + 视锥体 ----------
     def draw_scene(
         self,
         kpts_world,
         C_L_world,
         C_R_world,
-        fov_deg=60,
+        focal_length: np.ndarray,
         frustum_depth=1.0,
         title="Person-centered world with two cameras",
     ):
@@ -130,27 +169,66 @@ class SceneVisualizer:
         C_L_world = np.asarray(C_L_world)
         C_R_world = np.asarray(C_R_world)
 
-        X = kpts_world[:, 0]
-        Y = kpts_world[:, 1]
-        Z = kpts_world[:, 2]
-
         fig = plt.figure(figsize=(8, 8))
         ax = fig.add_subplot(111, projection="3d")
 
         # --- 1. 人体骨架 ---
-        ax.scatter(X, Y, Z, s=20)
+
+        # Matplotlib 颜色需要是 0.0 到 1.0 的 RGB/RGBA
+        raw_kpt_colors_mp = self.kpt_color
+        # 关键点颜色转换
+        if raw_kpt_colors_mp is not None and not isinstance(raw_kpt_colors_mp, str):
+            # 将颜色转换为 NumPy 数组并归一化到 0.0-1.0 范围
+            kpt_color = np.array(raw_kpt_colors_mp, dtype=np.float32) / 255.0
+
+        # 连线颜色转换
+        raw_link_colors_mp = self.link_color
+        if raw_link_colors_mp is not None and not isinstance(raw_link_colors_mp, str):
+            link_color = np.array(raw_link_colors_mp, dtype=np.float32) / 255.0
+
+        kpts_world = self.convert_opencv_matplotlib(kpts_world, flag="person")
+
+        # 绘制 3D 关键点
+        ax.scatter(
+            kpts_world[:, 0],
+            kpts_world[:, 1],
+            kpts_world[:, 2],
+            c=kpt_color,
+            marker="o",
+            s=self.radius * 10,  # 调整点的大小以便在 3D 中可见
+            alpha=self.alpha,
+        )
+
+        # 绘制 3D 骨架连线
         if self.skeleton is not None:
-            for i, j in self.skeleton:
-                xs = [kpts_world[i, 0], kpts_world[j, 0]]
-                ys = [kpts_world[i, 1], kpts_world[j, 1]]
-                zs = [kpts_world[i, 2], kpts_world[j, 2]]
-                ax.plot(xs, ys, zs)
+            link_colors_mp = link_color
+
+            for i, (p1_idx, p2_idx) in enumerate(self.skeleton):
+                # 获取连接线的颜色，确保在 0.0-1.0 范围
+                color = link_colors_mp[i % len(link_colors_mp)]  # 循环使用颜色
+
+                # 提取两个点的坐标
+                p1 = kpts_world[p1_idx]
+                p2 = kpts_world[p2_idx]
+
+                # 绘制连接线
+                ax.plot(
+                    [p1[0], p2[0]],
+                    [p1[1], p2[1]],
+                    [p1[2], p2[2]],
+                    color=color,
+                    linewidth=self.line_width * 2,  # 调整线宽
+                    alpha=self.alpha,
+                )
 
         # 标记骨盆为原点（假设 0 是骨盆）
         ax.scatter([0], [0], [0], s=60)
         ax.text(0, 0, 0, "pelvis(0,0,0)")
 
         # --- 2. 左相机 ---
+
+        C_L_world = self.convert_opencv_matplotlib(C_L_world, flag="cam")
+
         ax.scatter(
             C_L_world[0], C_L_world[1], C_L_world[2], marker="^", s=80, color="r"
         )
@@ -165,6 +243,9 @@ class SceneVisualizer:
         self.draw_frustum(ax, C_L_world, frustum_L, color="r")
 
         # --- 3. 右相机 ---
+
+        C_R_world = self.convert_opencv_matplotlib(C_R_world, flag="cam")
+
         ax.scatter(
             C_R_world[0], C_R_world[1], C_R_world[2], marker="s", s=80, color="b"
         )
@@ -204,6 +285,5 @@ class SceneVisualizer:
         # ax.view_init(elev=20, azim=-60)
 
         plt.tight_layout()
-        plt.show()
-    
+
         return fig

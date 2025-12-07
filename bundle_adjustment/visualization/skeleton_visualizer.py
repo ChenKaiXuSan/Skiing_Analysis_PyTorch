@@ -43,6 +43,26 @@ class SkeletonVisualizer:
         self.link_color = parsed_meta.get("skeleton_link_colors", self.link_color)
         self.skeleton = parsed_meta.get("skeleton_links", self.skeleton)
 
+    def convert_opencv_matplotlib(self, opencv_point: np.ndarray, flag: str):
+        # ------- OpenCV(world) -> Matplotlib(world) 线性映射 -------
+        # x 保持；z(前) -> y(前)；-y(上) -> z(上)
+        M = np.array(
+            [
+                [1.0, 0.0, 0.0],  # x -> x
+                [0.0, 0.0, 1.0],  # z -> y
+                [0.0, -1.0, 0.0],  # -y -> z
+            ],
+            dtype=float,
+        )
+
+        # 将点从opencv > matplotlib
+        if flag == "cam":
+            matplotlib_point = (M @ opencv_point).reshape(3)
+        elif flag == "person":
+            matplotlib_point = (M @ opencv_point.T).T
+
+        return matplotlib_point
+
     def draw_skeleton(
         self,
         image: np.ndarray,
@@ -322,8 +342,6 @@ class SkeletonVisualizer:
     def draw_skeleton_3d(
         self,
         points_3d: np.ndarray,
-        colors: Optional[np.ndarray] = None,
-        link_colors: Optional[np.ndarray] = None,  # 新增参数，用于覆盖默认连接线颜色
         window_title: str = "3D Skeleton Visualization",
     ):
         """
@@ -344,6 +362,8 @@ class SkeletonVisualizer:
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
+
+        points_3d = self.convert_opencv_matplotlib(points_3d, flag="person")
 
         # 确保坐标轴比例一致，避免扭曲
         max_range = (
@@ -376,7 +396,7 @@ class SkeletonVisualizer:
             points_3d[:, 0],
             points_3d[:, 1],
             points_3d[:, 2],
-            c=kpt_color if raw_kpt_colors_mp is not None else colors,
+            c=kpt_color,
             marker="o",
             s=self.radius * 10,  # 调整点的大小以便在 3D 中可见
             alpha=self.alpha,
@@ -384,9 +404,7 @@ class SkeletonVisualizer:
 
         # 3. 绘制 3D 骨架连线
         if self.skeleton is not None:
-            link_colors_mp = (
-                link_color if raw_link_colors_mp is not None else link_colors
-            )
+            link_colors_mp = link_color
 
             for i, (p1_idx, p2_idx) in enumerate(self.skeleton):
                 # 获取连接线的颜色，确保在 0.0-1.0 范围
