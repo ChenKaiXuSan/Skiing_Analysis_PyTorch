@@ -241,6 +241,8 @@ def draw_camera(
 
     # ------- 相机中心映射到 Matplotlib 世界系 -------
     C_plt = (M @ C_cv).reshape(3)
+    
+    logger.info(f"[Draw Camera]{label} Center (Matplotlib world): {C_plt}")
 
     # ------- 画相机坐标轴（使用 R_wc 的行向量作为相机轴在世界系中的表示）-------
     # rows of R_wc: x_cam,y_cam,z_cam expressed in world(OpenCV) coords

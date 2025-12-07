@@ -185,8 +185,6 @@ def main(cfg: DictConfig) -> None:
         return
 
     # -------------------------- 顺序执行（无多线程） -------------------------- #
-    ok_mv = 0
-    fail_mv = 0
 
     for (
         subject_name,
@@ -221,11 +219,6 @@ def main(cfg: DictConfig) -> None:
             out_root=out_root,
             cfg=cfg,
         )
-        if out_dir is None:
-            fail_mv += 1
-            logger.error(f"[Subject: {subject_name}] Multi-view FAILED (None out_dir)")
-
-    logger.info(f"==== ALL DONE ====\n  Success: {ok_mv}\n  Failed : {fail_mv}")
 
 
 if __name__ == "__main__":

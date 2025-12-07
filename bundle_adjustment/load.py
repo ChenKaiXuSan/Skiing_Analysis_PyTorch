@@ -246,6 +246,9 @@ def load_sam_3d_body_results(npz_path: str) -> Dict[str, np.ndarray]:
     if not os.path.exists(npz_path):
         raise FileNotFoundError(f"SAM 3D Body results file not found: {npz_path}")
     logger.info(f"Loading SAM 3D Body results from: {npz_path}")
-    data = np.load(npz_path)
-    results = {key: data[key] for key in data.files}
+    data = np.load(npz_path, allow_pickle=True)
+    results = {}
+    for idx, info in enumerate(data["outputs"]):
+        results[idx] = info
+
     return results

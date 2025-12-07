@@ -173,6 +173,50 @@ def process_multi_view_video(
             frame_id=idx,
         )
 
+        # scale bboxes to match the resized image size
+        source_size = left_frames.shape[1:3]  # (H,W)
+        target_size = world_points_from_depth.shape[0:2]  # (H,W)
+
+        # 得到的 R,t 是 以第一个相机为参考系的 世界坐标系
+        # 所以需要对这个进行平移，将坐标系移动回人物身上
+
+        extract_person_points_left = extract_person_points(
+            pointmap=world_points_from_depth[0],
+            bbox=left_bboxes[idx],
+            img_size=source_size,
+        )
+
+        extract_person_points_right = extract_person_points(
+            pointmap=world_points_from_depth[1],
+            bbox=right_bboxes[idx],
+            img_size=source_size,
+        )
+
+        left_origin = extract_person_points_left.mean(axis=0)  # (3,)
+        right_origin = extract_person_points_right.mean(axis=0)  # (3,)
+
+        # 用一个统一的 origin（比如两者平均）
+        origin = 0.5 * (left_origin + right_origin)
+
+        # 更新 t 向量，使新的世界坐标系原点对齐到 new_world_origin
+        # 注意这里的 R 是 world->cam 的变换矩阵
+        for cam_id in range(len(R)):
+            t[cam_id] = t[cam_id] + R[cam_id] @ origin
+
+        # 旋转右视角180度，使其与左视角对齐
+        R_align = np.array(
+            [
+                [-1, 0, 0],
+                [0, 1, 0],
+                [0, 0, -1],
+            ]
+        )
+        R[1] = R_align @ R[1]
+        t[1] = R_align @ t[1]
+
+        t[1][0] = -t[1][0]  # 水平翻转
+        t[1][2] = -t[1][2]  # 深度翻转
+
         x3d, reprojet_err = triangulate_one_frame(
             kptL=left_kpts[idx],
             kptR=right_kpts[idx],
@@ -194,8 +238,9 @@ def process_multi_view_video(
             R=np.stack([R[0], R[1]], axis=0),
             T=np.stack([t[0], t[1]], axis=0),
             keypoints_3d=x3d,
-            save_dir=out_dir / "skeleton_camera_viz" / f"frame_{idx:04d}.png",
+            save_dir=out_dir / "skeleton_camera_viz" / "raw" / f"frame_{idx:04d}.png",
         )
+
         # write reprojetion error to log
         with open(out_dir / "raw_reprojection_error.txt", "a") as f:
             f.write(f"Frame {idx:04d} Reprojection Error (in pixels):\n")
@@ -203,10 +248,6 @@ def process_multi_view_video(
                 if isinstance(v, np.ndarray):
                     continue
                 f.write(f"  {k}: {v}\n")
-
-        # scale bboxes to match the resized image size
-        source_size = left_frames.shape[1:3]  # (H,W)
-        target_size = world_points_from_depth.shape[0:2]  # (H,W)
 
         left_bboxes[idx] = scale_bbox(
             bbox=left_bboxes[idx],
@@ -254,7 +295,10 @@ def process_multi_view_video(
             R=np.stack([R[0], R[1]], axis=0),
             T=np.stack([t[0], t[1]], axis=0),
             keypoints_3d=x3d,
-            save_dir=out_dir / "skeleton_camera_viz" / f"update_frame_{idx:04d}.png",
+            save_dir=out_dir
+            / "skeleton_camera_viz"
+            / "update"
+            / f"frame_{idx:04d}.png",
         )
 
         all_frame_raw_x3d.append(x3d)
@@ -307,6 +351,48 @@ def process_multi_view_video(
     #         right_kpts=right_kpts,
     #         mode=mode,
     #     )
+
+
+def extract_person_points(pointmap, bbox, img_size):
+    """
+    pointmap : (H_pm, W_pm, 3)   # VGGT pointmap
+    bbox     : (x1, y1, x2, y2)  # 在原图像分辨率下
+    img_size : (H_img, W_img)   # 原图大小，用来做坐标对齐
+    return   : (N,3) 人体点云 (在VGGT世界系/第1相机系)
+    """
+
+    H_img, W_img = img_size
+    H_pm, W_pm = pointmap.shape[:2]
+
+    # ---- ① bbox 从原图映射到 pointmap 分辨率 ----
+    sx = W_pm / W_img
+    sy = H_pm / H_img
+
+    x1, y1, x2, y2 = bbox
+    x1 = int(x1 * sx)
+    x2 = int(x2 * sx)
+    y1 = int(y1 * sy)
+    y2 = int(y2 * sy)
+
+    # ---- ② 裁剪并提取 3D 点 ----
+    x1 = np.clip(x1, 0, W_pm - 1)
+    x2 = np.clip(x2, 0, W_pm)
+    y1 = np.clip(y1, 0, H_pm - 1)
+    y2 = np.clip(y2, 0, H_pm)
+
+    crop = pointmap[y1:y2, x1:x2, :]  # (h,w,3)
+    P = crop.reshape(-1, 3)
+
+    # ---- ③ 去除无效点 / 背景深度 ----
+    mask_valid = np.isfinite(P).all(axis=1)
+    P = P[mask_valid]
+
+    if len(P) > 0:
+        z = P[:, 2]
+        z_med = np.median(z)
+        P = P[np.abs(z - z_med) < 3.0 * np.std(z)]  # 过滤远处背景
+
+    return P
 
 
 def scale_bbox(
