@@ -162,8 +162,12 @@ def rigid_transform_3D(
         Rt = R[t].copy()
 
         # 1) 分别规范化（pelvis 原点 + pelvis–neck 归一）
-        Lt_n, _, pelvis_L = _center_scale_sam(Lt)
-        Rt_n, _, pelvis_R = _center_scale_sam(Rt)
+        # Lt_n, _, pelvis_L = _center_scale_sam(Lt)
+        # Rt_n, _, pelvis_R = _center_scale_sam(Rt)
+
+        # FIXME: 这里先不中心化，直接用原始坐标进行刚体估计
+        Lt_n = Lt
+        Rt_n = Rt
 
         # 2) 用躯干点估计 Rt_n → Lt_n 的相似变换
         torso_L, torso_R = Lt_n[TORSO_IDX], Rt_n[TORSO_IDX]
@@ -195,7 +199,7 @@ def rigid_transform_3D(
         )
 
         # 4) 融合后再次统一到 pelvis 原点 + pelvis–neck 归一
-        fused, *_ = _center_scale_sam(fused)
+        # fused, *_ = _center_scale_sam(fused)
         fused_seq[t] = fused
 
         # 5) 诊断信息
@@ -204,8 +208,6 @@ def rigid_transform_3D(
             fl = float(np.linalg.norm(fused - Lt_n, axis=-1).mean())
             fr = float(np.linalg.norm(fused - Rt_n, axis=-1).mean())
             gain = lr_before - 0.5 * (fl + fr)
-            left_centering = pelvis_L
-            right_centering = pelvis_R
 
             diag["per_frame"].append(
                 {
@@ -217,8 +219,6 @@ def rigid_transform_3D(
                     "s": float(s_hat),
                     "R": R_hat.copy(),
                     "t": t_hat.copy(),
-                    "left_centering": left_centering,
-                    "right_centering": right_centering,
                 }
             )
             if gain < 0:

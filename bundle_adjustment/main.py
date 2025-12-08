@@ -210,10 +210,10 @@ def main(cfg: DictConfig) -> None:
         out_dir = process_one_person(
             left_video_path=left_v,
             left_pt_path=left_pt,
+            left_sam3d_body_path=left_sam3d_body,
             right_video_path=right_v,
             right_pt_path=right_pt,
-            left_sam3d_body_path=left_sam3d_body,  # 追加: left_sam3d_body
-            right_sam3d_body_path=right_sam3d_body,  # 追加: right_sam3d_body
+            right_sam3d_body_path=right_sam3d_body,
             vggt_files=vggt_files,
             videopose3d_files=videopose3d_files,
             out_root=out_root / subject_name,

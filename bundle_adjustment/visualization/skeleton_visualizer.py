@@ -43,26 +43,6 @@ class SkeletonVisualizer:
         self.link_color = parsed_meta.get("skeleton_link_colors", self.link_color)
         self.skeleton = parsed_meta.get("skeleton_links", self.skeleton)
 
-    def convert_opencv_matplotlib(self, opencv_point: np.ndarray, flag: str):
-        # ------- OpenCV(world) -> Matplotlib(world) 线性映射 -------
-        # x 保持；z(前) -> y(前)；-y(上) -> z(上)
-        M = np.array(
-            [
-                [1.0, 0.0, 0.0],  # x -> x
-                [0.0, 0.0, 1.0],  # z -> y
-                [0.0, -1.0, 0.0],  # -y -> z
-            ],
-            dtype=float,
-        )
-
-        # 将点从opencv > matplotlib
-        if flag == "cam":
-            matplotlib_point = (M @ opencv_point).reshape(3)
-        elif flag == "person":
-            matplotlib_point = (M @ opencv_point.T).T
-
-        return matplotlib_point
-
     def draw_skeleton(
         self,
         image: np.ndarray,
@@ -88,6 +68,12 @@ class SkeletonVisualizer:
         img_h, img_w, _ = image.shape
         if len(keypoints.shape) == 2:
             keypoints = keypoints[None, :, :]
+
+        # ensure keypoints has shape B x N x 3
+        if keypoints.shape[2] != 3:
+            keypoints = np.concatenate(
+                [keypoints, np.ones((*keypoints.shape[:2], 1))], axis=2
+            )
 
         # loop for each person
         for cur_keypoints in keypoints:
@@ -203,144 +189,9 @@ class SkeletonVisualizer:
 
         return image
 
-    def draw_skeleton_analysis(
-        self,
-        image: np.ndarray,
-        keypoints: np.ndarray,
-        kpt_thr: float = 0.3,
-        show_kpt_idx: bool = False,
-    ):
-        """Draw keypoints and skeletons (optional) of prediction.
-        The color is determined by whether the keypoint is correctly predicted.
-
-        Args:
-            image (np.ndarray): The image to draw.
-            keypoints (np.ndarray): B x N x 4
-            kpt_thr (float, optional): Minimum threshold of keypoints
-                to be shown. Default: 0.3.
-            show_kpt_idx (bool): Whether to show the index of keypoints.
-                Defaults to ``False``
-
-        Returns:
-            np.ndarray: the drawn image which channel is RGB.
-        """
-
-        image = image.copy()
-        img_h, img_w, _ = image.shape
-        if len(keypoints.shape) == 2:
-            keypoints = keypoints[None, :, :]
-
-        # loop for each person
-        for cur_keypoints in keypoints:
-            kpts = cur_keypoints[:, :-2]
-            score = cur_keypoints[:, -2]
-            correct = cur_keypoints[:, -1]
-
-            kpt_color = [
-                [0, 255, 0] if correct[kid] else [0, 0, 255] for kid in range(len(kpts))
-            ]
-            kpt_color = np.array(kpt_color, dtype=np.uint8)
-
-            # draw links
-            if self.skeleton is not None and self.link_color is not None:
-                if self.link_color is None or isinstance(self.link_color, str):
-                    link_color = [self.link_color] * len(self.skeleton)
-                elif len(self.link_color) == len(self.skeleton):
-                    link_color = self.link_color
-                else:
-                    raise ValueError(
-                        f"the length of link_color "
-                        f"({len(self.link_color)}) does not matches "
-                        f"that of skeleton ({len(self.skeleton)})"
-                    )
-
-                for sk_id, sk in enumerate(self.skeleton):
-                    pos1 = (int(kpts[sk[0], 0]), int(kpts[sk[0], 1]))
-                    pos2 = (int(kpts[sk[1], 0]), int(kpts[sk[1], 1]))
-                    if (
-                        pos1[0] <= 0
-                        or pos1[0] >= img_w
-                        or pos1[1] <= 0
-                        or pos1[1] >= img_h
-                        or pos2[0] <= 0
-                        or pos2[0] >= img_w
-                        or pos2[1] <= 0
-                        or pos2[1] >= img_h
-                        or score[sk[0]] < kpt_thr
-                        or score[sk[1]] < kpt_thr
-                        or link_color[sk_id] is None
-                    ):
-                        # skip the link that should not be drawn
-                        continue
-
-                    color = link_color[sk_id]
-                    if not isinstance(color, str):
-                        color = tuple(int(c) for c in color)
-                    transparency = self.alpha
-                    if self.show_keypoint_weight:
-                        transparency *= max(
-                            0, min(1, 0.5 * (score[sk[0]] + score[sk[1]]))
-                        )
-
-                    image = cv2.line(
-                        image,
-                        pos1,
-                        pos2,
-                        color,
-                        thickness=self.line_width,
-                    )
-
-            # draw each point on image
-            for kid, kpt in enumerate(kpts):
-                if score[kid] < kpt_thr or kpt_color[kid] is None:
-                    # skip the point that should not be drawn
-                    continue
-
-                color = kpt_color[kid]
-                if not isinstance(color, str):
-                    color = tuple(int(c) for c in color)
-                transparency = self.alpha
-                if self.show_keypoint_weight:
-                    transparency *= max(0, min(1, score[kid]))
-
-                if transparency == 1.0:
-                    image = cv2.circle(
-                        image,
-                        (int(kpt[0]), int(kpt[1])),
-                        int(self.radius),
-                        color,
-                        -1,
-                    )
-                else:
-                    temp = image = cv2.circle(
-                        image.copy(),
-                        (int(kpt[0]), int(kpt[1])),
-                        int(self.radius),
-                        color,
-                        -1,
-                    )
-                    image = cv2.addWeighted(
-                        image, 1 - transparency, temp, transparency, 0
-                    )
-
-                if show_kpt_idx:
-                    kpt[0] += self.radius
-                    kpt[1] -= self.radius
-                    image = draw_text(
-                        image,
-                        str(kid),
-                        kpt,
-                        image_size=(img_w, img_h),
-                        color=color,
-                        font_size=self.radius * 3,
-                        vertical_alignment="bottom",
-                        horizontal_alignment="center",
-                    )
-
-        return image
-
     def draw_skeleton_3d(
         self,
+        ax: plt.axes,
         points_3d: np.ndarray,
         window_title: str = "3D Skeleton Visualization",
     ):
@@ -354,16 +205,16 @@ class SkeletonVisualizer:
             window_title (str): 可视化窗口的标题。
         """
         # 1. 初始化 3D 绘图
-        fig = plt.figure(figsize=(8, 8))
-        ax = fig.add_subplot(111, projection="3d")
+        if ax is None:
+            created_fig = plt.figure(figsize=(8, 8))
+            ax = created_fig.add_subplot(111, projection="3d")
+
         ax.set_title(window_title)
 
         # 设置坐标轴标签
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
-
-        points_3d = self.convert_opencv_matplotlib(points_3d, flag="person")
 
         # 确保坐标轴比例一致，避免扭曲
         max_range = (
@@ -375,6 +226,7 @@ class SkeletonVisualizer:
         mid_x = (points_3d[:, 0].max() + points_3d[:, 0].min()) / 2.0
         mid_y = (points_3d[:, 1].max() + points_3d[:, 1].min()) / 2.0
         mid_z = (points_3d[:, 2].max() + points_3d[:, 2].min()) / 2.0
+
         ax.set_xlim(mid_x - max_range, mid_x + max_range)
         ax.set_ylim(mid_y - max_range, mid_y + max_range)
         ax.set_zlim(mid_z - max_range, mid_z + max_range)
@@ -424,5 +276,13 @@ class SkeletonVisualizer:
                     alpha=self.alpha,
                 )
 
+        # 翻转 Z 轴显示方向
+        zmin, zmax = ax.get_zlim()
+        ax.set_zlim(zmax, zmin)  # 上下限调换
+
+        ax.view_init(elev=-30, azim=270)
+
+        plt.tight_layout()
+
         # 返回 Figure 对象，Notebook 会自动显示它
-        return fig
+        return created_fig if created_fig is not None else ax

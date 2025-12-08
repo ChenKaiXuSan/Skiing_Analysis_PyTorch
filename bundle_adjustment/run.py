@@ -144,6 +144,11 @@ def process_one_person(
         flag="scene",
     )
 
+    merge_frame_to_video(
+        save_path=out_root,
+        flag="frame_scene",
+    )
+
 
 def process_frame(
     left_sam3d_body_res,
@@ -155,10 +160,14 @@ def process_frame(
 ):
     # 模拟 Ground Truth (Target B)
 
+    left_frame = left_sam3d_body_res[frame_idx]["frame"]
+    right_frame = right_sam3d_body_res[frame_idx]["frame"]
+    left_kpt_2d = left_sam3d_body_res[frame_idx]["pred_keypoints_2d"]
+    right_kpt_2d = right_sam3d_body_res[frame_idx]["pred_keypoints_2d"]
     left_kpt_3d = left_sam3d_body_res[frame_idx]["pred_keypoints_3d"]
     right_kpt_3d = right_sam3d_body_res[frame_idx]["pred_keypoints_3d"]
-    C_L_world = -left_sam3d_body_res[frame_idx]["pred_cam_t"]
-    C_R_person = -right_sam3d_body_res[frame_idx]["pred_cam_t"]
+    C_L_world = left_sam3d_body_res[frame_idx]["pred_cam_t"]
+    C_R_person = right_sam3d_body_res[frame_idx]["pred_cam_t"]
 
     left_focal_len = left_sam3d_body_res[frame_idx]["focal_length"]
     right_focal_len = right_sam3d_body_res[frame_idx]["focal_length"]
@@ -180,23 +189,23 @@ def process_frame(
         diag["per_frame"][0]["t"],
     )
 
-    left_centering = diag["per_frame"][0]["left_centering"]
-    right_centering = diag["per_frame"][0]["right_centering"]
-
     # sam 3d预测的，左、右相机中心
     # 这里的任务需要把右相机从右人系，变换到世界系（左人系）
 
-    # centering correction，因为kpt进行了中心化，所以相机在渲染时也要相应调整
-    C_L_world -= left_centering
-    C_R_person -= right_centering
-
     # * 右相机根据右人系坐标 + 右→左的相似变换，得到右世界系坐标
-    C_R_world = s * (R_RL @ C_R_person) + t_RL  # 右世界系
+    # C_R_world = s * (R_RL @ C_R_person) + t_RL  # 右世界系
+    # ! 直接把plt的坐标转换为opencv的坐标系，不进行坐标层面的改变，只进行渲染层面的改变
+    C_L_world[1] = -C_L_world[1]
+    C_R_person = -C_R_person
+    C_R_world = C_R_person
+
+    # 因为plt的z反转了，所以这里也要反转一下kpt的z轴
+    fused[:, 2] = -fused[:, 2]
 
     # ---------- 画骨架图 ----------
     kpts_world = fused  # 直接把左视角的人当作世界里的骨架
 
-    plt_skeleton = skeleton_visualizer.draw_skeleton_3d(kpts_world)
+    plt_skeleton = skeleton_visualizer.draw_skeleton_3d(ax=None, points_3d=kpts_world)
 
     out_skeleton = out_root / "fused"
     out_skeleton.mkdir(parents=True, exist_ok=True)
@@ -206,9 +215,10 @@ def process_frame(
     # ---------- 画场景图 ----------
     # TODO: 相机的位置还是有问题，会出现飘逸现象，需要进一步调试
     plt_scene = scene_visualizer.draw_scene(
-        kpts_world,
-        C_L_world,
-        C_R_world,
+        ax=None,
+        kpts_world=kpts_world,
+        C_L_world=C_L_world,
+        C_R_world=C_R_world,
         left_focal_length=left_focal_len,
         right_focal_length=right_focal_len,
     )
@@ -217,3 +227,27 @@ def process_frame(
     out_scene.mkdir(parents=True, exist_ok=True)
 
     plt_scene.savefig(out_scene / f"{frame_idx}.png", dpi=300)
+
+    # 画左右frame + scene
+
+    left_kpt_with_frame = skeleton_visualizer.draw_skeleton(
+        image=left_frame, keypoints=left_kpt_2d
+    )
+    right_kpt_with_frame = skeleton_visualizer.draw_skeleton(
+        image=right_frame, keypoints=right_kpt_2d
+    )
+
+    plt_frame_scene = scene_visualizer.draw_frame_with_scene(
+        left_frame=left_kpt_with_frame,
+        right_frame=right_kpt_with_frame,
+        pose_3d=kpts_world,
+        C_L_world=C_L_world,
+        C_R_world=C_R_world,
+        left_focal_length=left_focal_len,
+        right_focal_length=right_focal_len,
+    )
+
+    out_frame_scene = out_root / "frame_scene"
+    out_frame_scene.mkdir(parents=True, exist_ok=True)
+
+    plt_frame_scene.savefig(out_frame_scene / f"{frame_idx}.png", dpi=300)

@@ -29,9 +29,9 @@ from typing import Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.gridspec import GridSpec
 
 from ..fuse.fuse import TORSO_IDX
-
 from .utils import draw_text, parse_pose_metainfo
 
 # sam 3d body 的关键关节索引（你已经给定）
@@ -67,6 +67,9 @@ class SceneVisualizer:
         # Pose specific meta info if available.
         self.pose_meta = {}
         self.skeleton = None
+
+        self.fig = None
+        self.ax = None
 
     def set_pose_meta(self, pose_meta: Dict):
         parsed_meta = parse_pose_metainfo(pose_meta)
@@ -135,7 +138,6 @@ class SceneVisualizer:
         x_axis = R[:, 0] * length
         y_axis = R[:, 1] * length
         z_axis = R[:, 2] * length
-
         # 画出三个轴
         ax.plot(
             [C[0], C[0] + x_axis[0]],
@@ -178,98 +180,67 @@ class SceneVisualizer:
 
         return fov_deg
 
-    def convert_opencv_matplotlib(self, opencv_point: np.ndarray, flag: str):
-        # ------- OpenCV(world) -> Matplotlib(world) 线性映射 -------
-        # x 保持；z(前) -> y(前)；-y(上) -> z(上)
-        M = np.array(
-            [
-                [1.0, 0.0, 0.0],  # x -> x
-                [0.0, 0.0, 1.0],  # z -> y
-                [0.0, -1.0, 0.0],  # -y -> z
-            ],
-            dtype=float,
-        )
-
-        # 将点从opencv > matplotlib
-        if flag == "cam":
-            matplotlib_point = (M @ opencv_point).reshape(3)
-        elif flag == "person":
-            matplotlib_point = (M @ opencv_point.T).T
-
-        return matplotlib_point
-
     # ---------- 主函数：画人物 + 左右相机 + 视锥体 ----------
     def draw_scene(
         self,
+        ax: plt.axes,
         kpts_world,
         C_L_world,
         C_R_world,
         left_focal_length: np.ndarray,
         right_focal_length: np.ndarray,
         frustum_depth=0.5,
-        title="Person-centered world with two cameras",
     ):
         """
-        kpts_world : (J,3)  人体 3D 关键点（以骨盆为原点）
-        C_L_world  : (3,)   左相机位置（世界系）
-        C_R_world  : (3,)   右相机位置（世界系）
-        edges      : list[(i,j)] 骨架拓扑，没给的话只画点
-        fov_deg    : 视锥 FOV
-        frustum_depth : 视锥长度
+        在给定的 ax 上画 3D 场景；如果 ax 为 None，则自己新建 fig+ax。
         """
         kpts_world = np.asarray(kpts_world)
         C_L_world = np.asarray(C_L_world)
         C_R_world = np.asarray(C_R_world)
 
-        fig = plt.figure(figsize=(8, 8))
-        ax = fig.add_subplot(111, projection="3d")
+        created_fig = None
+        if ax is None:
+            created_fig = plt.figure(figsize=(6, 6))
+            ax = created_fig.add_subplot(111, projection="3d")
 
-        # --- 1. 人体骨架 ---
-
-        # Matplotlib 颜色需要是 0.0 到 1.0 的 RGB/RGBA
+        # --- 颜色处理 ---
+        kpt_color = "r"
         raw_kpt_colors_mp = self.kpt_color
-        # 关键点颜色转换
         if raw_kpt_colors_mp is not None and not isinstance(raw_kpt_colors_mp, str):
-            # 将颜色转换为 NumPy 数组并归一化到 0.0-1.0 范围
             kpt_color = np.array(raw_kpt_colors_mp, dtype=np.float32) / 255.0
 
-        # 连线颜色转换
+        link_color = "b"
         raw_link_colors_mp = self.link_color
         if raw_link_colors_mp is not None and not isinstance(raw_link_colors_mp, str):
             link_color = np.array(raw_link_colors_mp, dtype=np.float32) / 255.0
 
-        kpts_world = self.convert_opencv_matplotlib(kpts_world, flag="person")
-
-        # 绘制 3D 关键点
+        # --- 1. 人体骨架 ---
         ax.scatter(
             kpts_world[:, 0],
             kpts_world[:, 1],
             kpts_world[:, 2],
             c=kpt_color,
             marker="o",
-            s=self.radius * 10,  # 调整点的大小以便在 3D 中可见
+            s=self.radius * 10,
             alpha=self.alpha,
         )
 
-        # 绘制 3D 骨架连线
         if self.skeleton is not None:
             link_colors_mp = link_color
-
             for i, (p1_idx, p2_idx) in enumerate(self.skeleton):
-                # 获取连接线的颜色，确保在 0.0-1.0 范围
-                color = link_colors_mp[i % len(link_colors_mp)]  # 循环使用颜色
-
-                # 提取两个点的坐标
                 p1 = kpts_world[p1_idx]
                 p2 = kpts_world[p2_idx]
-
-                # 绘制连接线
+                color = (
+                    link_colors_mp[i % len(link_colors_mp)]
+                    if not isinstance(link_colors_mp, str)
+                    else link_colors_mp
+                )
                 ax.plot(
                     [p1[0], p2[0]],
                     [p1[1], p2[1]],
                     [p1[2], p2[2]],
                     color=color,
-                    linewidth=self.line_width * 2,  # 调整线宽
+                    linewidth=self.line_width * 2,
                     alpha=self.alpha,
                 )
 
@@ -278,90 +249,132 @@ class SceneVisualizer:
         ax.text(0, 0, 0, "pelvis(0,0,0)")
 
         # --- 2. 左相机 ---
-
-        C_L_world = self.convert_opencv_matplotlib(C_L_world, flag="cam")
-
-        # 相机中心需要平移
         ax.scatter(
             C_L_world[0], C_L_world[1], C_L_world[2], marker="^", s=80, color="r"
         )
-        ax.text(C_L_world[0], C_L_world[1], C_L_world[2], "Cam L", color="r")
+        ax.text(
+            C_L_world[0], C_L_world[1], C_L_world[2], f"Cam L ({C_L_world})", color="r"
+        )
 
-        # 朝向：根据TORSO_IDX计算人物中心，看向人物原点
+        # 相机看向人物中心
         person_center = kpts_world[TORSO_IDX].mean(axis=0)
 
-        dL = person_center - C_L_world
-        dL = dL / (np.linalg.norm(dL) + 1e-8)
+        left_forward = person_center - C_L_world
+        left_forward = left_forward / (np.linalg.norm(left_forward) + 1e-8)
 
-        # dL = -C_L_world
-        # dL = dL / (np.linalg.norm(dL) + 1e-8)
         fov_deg_L = self.calculate_fov_deg(
             focal_length=left_focal_length, image_dimension=1080
         )
         frustum_L = self.compute_frustum_points(
-            C_L_world, dL, fov_deg=fov_deg_L, depth=frustum_depth
+            C_L_world, forward=left_forward, fov_deg=fov_deg_L, depth=frustum_depth
         )
         self.draw_frustum(ax, C_L_world, frustum_L, color="r")
-
         self.draw_camera_axes(ax, C_L_world, np.eye(3), length=0.1)
 
-        ax.scatter(C_L_world[0], C_L_world[1], C_L_world[2], s=60)
-        ax.text(C_L_world[0], C_L_world[1], C_L_world[2], "Cam L")
-
         # --- 3. 右相机 ---
-
-        C_R_world = self.convert_opencv_matplotlib(C_R_world, flag="cam")
-
         ax.scatter(
             C_R_world[0], C_R_world[1], C_R_world[2], marker="s", s=80, color="b"
         )
-        ax.text(C_R_world[0], C_R_world[1], C_R_world[2], "Cam R", color="b")
+        ax.text(
+            C_R_world[0],
+            C_R_world[1],
+            C_R_world[2],
+            f"Cam R ({C_R_world})",
+            color="b",
+        )
 
-        # 朝向：根据TORSO_IDX计算人物中心，看向人物原点
-        dR = person_center - C_R_world
-        dR = dR / (np.linalg.norm(dR) + 1e-8)
+        # 相机看向人物中心
 
-        # dR = -C_R_world
-        # dR = dR / (np.linalg.norm(dR) + 1e-8)
+        right_forward = person_center - C_R_world
+        right_forward = right_forward / (np.linalg.norm(right_forward) + 1e-8)
+
         fov_deg_R = self.calculate_fov_deg(
             focal_length=right_focal_length, image_dimension=1080
         )
         frustum_R = self.compute_frustum_points(
-            C_R_world, dR, fov_deg=fov_deg_R, depth=frustum_depth
+            C_R_world, forward=right_forward, fov_deg=fov_deg_R, depth=frustum_depth
         )
         self.draw_frustum(ax, C_R_world, frustum_R, color="b")
-
         self.draw_camera_axes(ax, C_R_world, np.eye(3), length=0.1)
 
-        ax.scatter(C_L_world[0], C_L_world[1], C_L_world[2], s=60)
-        ax.text(C_L_world[0], C_L_world[1], C_L_world[2], "Cam L")
-
-        # --- 4. 视线（相机到人）的连线（可选） ---
+        # --- 4. 视线连线（可选） ---
         ax.plot(
-            [C_L_world[0], 0],
-            [C_L_world[1], 0],
-            [C_L_world[2], 0],
+            [C_L_world[0], left_forward[0] + C_L_world[0]],
+            [C_L_world[1], left_forward[1] + C_L_world[1]],
+            [C_L_world[2], left_forward[2] + C_L_world[2]],
             linestyle="--",
             color="r",
             alpha=0.5,
         )
         ax.plot(
-            [C_R_world[0], 0],
-            [C_R_world[1], 0],
-            [C_R_world[2], 0],
+            [C_R_world[0], right_forward[0] + C_R_world[0]],
+            [C_R_world[1], right_forward[1] + C_R_world[1]],
+            [C_R_world[2], right_forward[2] + C_R_world[2]],
             linestyle="--",
             color="b",
             alpha=0.5,
         )
 
+        ax.set_xlim3d(-1, 1)
+        ax.set_ylim3d(-2, 0)
+        ax.set_zlim3d(-5, 5)
+
+        ax.set_box_aspect((1, 1, 1))
+
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
-        ax.set_title(title)
 
-        # 你可以在这里调一下默认视角：
-        # ax.view_init(elev=20, azim=-60)
+        # 翻转 Z 轴显示方向
+        zmin, zmax = ax.get_zlim()
+        ax.set_zlim(zmax, zmin)
 
-        plt.tight_layout()
+        ax.view_init(elev=-30, azim=270)
 
+        return created_fig if created_fig is not None else ax
+
+    def draw_frame_with_scene(
+        self,
+        left_frame: np.ndarray,
+        right_frame: np.ndarray,
+        pose_3d: np.ndarray,  # (J,3)
+        left_focal_length: np.ndarray,
+        right_focal_length: np.ndarray,
+        C_L_world: np.ndarray,
+        C_R_world: np.ndarray,
+        frame_num: int = 0,
+    ):
+        """
+        渲染一个 frame：左图+右图+3D pose，并返回 figure。
+        """
+        # 每次调用新建一个 figure，避免和之前的 self.ax 冲突
+        fig = plt.figure(figsize=(10, 8))
+        fig.suptitle(f"Frame {frame_num}")
+        gs = GridSpec(2, 2, figure=fig)
+
+        # -------- 左视角 ---------- #
+        axL = fig.add_subplot(gs[0, 0])
+        axL.imshow(left_frame)
+        axL.axis("off")
+        axL.set_title("Left view")
+
+        # -------- 右视角 ---------- #
+        axR = fig.add_subplot(gs[1, 0])
+        axR.imshow(right_frame)
+        axR.axis("off")
+        axR.set_title("Right view")
+
+        # -------- 3D pose ---------- #
+        ax_3d = fig.add_subplot(gs[:, 1], projection="3d")
+        ax_3d.set_title("3D Scene")
+        self.draw_scene(
+            kpts_world=pose_3d,
+            C_L_world=C_L_world,
+            C_R_world=C_R_world,
+            left_focal_length=left_focal_length,
+            right_focal_length=right_focal_length,
+            ax=ax_3d,
+        )
+
+        fig.tight_layout()
         return fig

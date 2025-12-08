@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-'''
+"""
 File: /workspace/code/VideoPose3D/fuse/fuse_check.py
 Project: /workspace/code/VideoPose3D/fuse
 Created Date: Friday November 7th 2025
@@ -18,10 +18,12 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
-'''
+"""
+
 import numpy as np
 
-def estimate_rigid_umeyama(X, Y, allow_scale=False):
+
+def estimate_rigid_umeyama(target, source, allow_scale=False):
     """
     使用 Umeyama 方法估计刚体/相似变换，使 s*R*Y + t ≈ X
     Args:
@@ -30,43 +32,48 @@ def estimate_rigid_umeyama(X, Y, allow_scale=False):
     Returns:
         R(3,3), t(3,), s(float), info(dict)
     """
-    X = np.asarray(X, dtype=float)
-    Y = np.asarray(Y, dtype=float)
-    assert X.shape == Y.shape and X.shape[1] == 3, "X,Y 必须是 (N,3)"
-    mask = np.all(np.isfinite(X), axis=1) & np.all(np.isfinite(Y), axis=1)
-    X, Y = X[mask], Y[mask]
+    target = np.asarray(target, dtype=float)
+    source = np.asarray(source, dtype=float)
+    assert target.shape == source.shape and target.shape[1] == 3, "X,Y 必须是 (N,3)"
+    mask = np.all(np.isfinite(target), axis=1) & np.all(np.isfinite(source), axis=1)
+    target, source = target[mask], source[mask]
 
-    N = X.shape[0]
+    N = target.shape[0]
     if N < 3:
         raise ValueError("至少需要 3 个非共线对应点")
 
-    muX, muY = X.mean(0), Y.mean(0)
-    Xc, Yc = X - muX, Y - muY
-    Sigma = (Yc.T @ Xc) / N  # 3x3
+    target_mean = target.mean(0)
+    source_mean = source.mean(0)
 
-    U, S, Vt = np.linalg.svd(Sigma)
-    R = U @ Vt
+    target_mm = target - target_mean
+    source_mm = source - source_mean
+
+    H = (source_mm.T @ target_mm) / N
+
+    U, S, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+
     # 反射修正：det(R) 应当为 +1
     reflect_fix = False
     if np.linalg.det(R) < 0:
-        U[:, -1] *= -1
-        R = U @ Vt
+        Vt[-1, :] *= -1
+        R = Vt.T @ U.T
         reflect_fix = True
 
     if allow_scale:
-        varY = (Yc**2).sum() / N
+        varY = (source_mm**2).sum() / N
         s = (S.sum()) / (varY + 1e-12)
     else:
         s = 1.0
 
-    t = muX - s * (R @ muY)
+    t = target_mean - s * (R @ source_mean)
 
     info = {
         "num_points": N,
         "singular_values": S,
         "reflect_fixed": reflect_fix,
-        "Sigma_rank": int(np.linalg.matrix_rank(Sigma)),
-        "cond_Sigma": (S[0] / S[-1]) if S[-1] > 0 else np.inf,
+        "H_rank": int(np.linalg.matrix_rank(H)),
+        "cond_H": (S[0] / S[-1]) if S[-1] > 0 else np.inf,
     }
     return R, t, s, info
 
@@ -76,7 +83,7 @@ def _pairwise_distances(A):
     N = A.shape[0]
     dists = []
     for i in range(N):
-        v = A[i+1:] - A[i]
+        v = A[i + 1 :] - A[i]
         d = np.linalg.norm(v, axis=1)
         dists.append(d)
     return np.concatenate(dists, axis=0) if dists else np.array([])
@@ -122,13 +129,13 @@ def check_rigid_validity(X, Y, R, t, allow_scale=False, tol=1e-6):
         report["notes"].append("X 或 Y 退化（秩 < 2）")
 
     # 共面提示：秩 == 2 可能导致旋转绕法歧义
-    report["coplanar_X_hint"] = (rank_X == 2)
-    report["coplanar_Y_hint"] = (rank_Y == 2)
+    report["coplanar_X_hint"] = rank_X == 2
+    report["coplanar_Y_hint"] = rank_Y == 2
 
     # -------- 刚体矩阵性质 --------
     RtR = R.T @ R
     I3 = np.eye(3)
-    ortho_err = np.linalg.norm(RtR - I3, ord='fro')
+    ortho_err = np.linalg.norm(RtR - I3, ord="fro")
     detR = np.linalg.det(R)
 
     report["orthogonality_error_Fro"] = float(ortho_err)
@@ -173,7 +180,11 @@ def check_rigid_validity(X, Y, R, t, allow_scale=False, tol=1e-6):
     # -------- 方向/尺度提示（可选）--------
     if allow_scale:
         # 粗略估一个比例（基于平均成对距离）
-        ratio = (np.mean(dX) / (np.mean(_pairwise_distances(Y)) + 1e-12)) if len(dX) > 0 else np.nan
+        ratio = (
+            (np.mean(dX) / (np.mean(_pairwise_distances(Y)) + 1e-12))
+            if len(dX) > 0
+            else np.nan
+        )
         report["distance_ratio_X_over_Y"] = float(ratio)
         # 注意：这只是量纲提示，不代表 s
     else:
