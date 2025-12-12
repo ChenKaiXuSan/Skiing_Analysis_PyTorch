@@ -18,11 +18,12 @@ Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.c
 -----
 """
 
+import gc
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
 from omegaconf import DictConfig
-
 from tqdm import tqdm
 
 from .fuse.fuse import rigid_transform_3D
@@ -40,13 +41,29 @@ from .loss import (
     reprojection_loss,
 )
 from .metadata.mhr70 import pose_info as mhr70_pose_info
+from .reproject import reproject_and_visualize
+from .visualization.merge import merge_frame_to_video
 from .visualization.scene_visualizer import SceneVisualizer
 from .visualization.skeleton_visualizer import SkeletonVisualizer
-from .visualization.merge import merge_frame_to_video
+
+K = np.array(
+    [
+        1116.9289548941917,
+        0.0,
+        955.77175993563799,
+        0.0,
+        1117.3341496962166,
+        538.91061167202145,
+        0.0,
+        0.0,
+        1.0,
+    ]
+).reshape(3, 3)
 
 
 def setup_visualizer():
-    """Set up skeleton visualizer with MHR70 pose info"""
+    """Set up skeleton visualizer with MHR70 pose info."""
+
     skeleton_visualizer = SkeletonVisualizer(line_width=2, radius=5)
     skeleton_visualizer.set_pose_meta(mhr70_pose_info)
 
@@ -66,8 +83,7 @@ def process_one_person(
     vggt_files: List[Path],
     videopose3d_files: List[Path],
     out_root: Path,
-    cfg: DictConfig,
-) -> Optional[Path]:
+) -> None:
     """
     Process one person with multi-view bundle adjustment.
 
@@ -124,7 +140,7 @@ def process_one_person(
         # if frame_idx > 60:
         #     break
 
-        process_frame(
+        left_frame, right_frame, kpts_world, R_RL, t_RL = process_frame(
             left_sam3d_body_res=left_sam3d_body_res,
             right_sam3d_body_res=right_sam3d_body_res,
             frame_idx=frame_idx,
@@ -132,6 +148,36 @@ def process_one_person(
             scene_visualizer=scene_visualizer,
             out_root=out_root,
         )
+
+        # 这里的R_RL, t_RL 是右相机到左相机的变换，所以需要用它来把右相机的位置变换到世界系
+        left_R = np.eye(3)
+        left_t = np.zeros(3)
+        right_R = R_RL.T
+        right_t = -R_RL.T @ t_RL
+
+        # TODO: 重投影误差
+        reproj_err = reproject_and_visualize(
+            img1=left_frame,
+            img2=right_frame,
+            X3=kpts_world,
+            kptL=left_sam3d_body_res[frame_idx]["pred_keypoints_2d"],
+            kptR=right_sam3d_body_res[frame_idx]["pred_keypoints_2d"],
+            K1=K,
+            K2=K,
+            dist1=None,
+            dist2=None,
+            R=[left_R, right_R],
+            T=[left_t, right_t],
+            out_path=out_root / "reprojection" / f"{frame_idx}.jpg",
+        )
+
+        # write reprojetion error to log
+        with open(out_root / "ba_reprojection_error.txt", "a") as f:
+            f.write(f"Frame {frame_idx:04d} Reprojection Error (in pixels):\n")
+            for k, v in reproj_err.items():
+                if isinstance(v, np.ndarray):
+                    continue
+                f.write(f"  {k}: {v}\n")
 
     # merge frame to video if needed
     merge_frame_to_video(
@@ -148,6 +194,9 @@ def process_one_person(
         save_path=out_root,
         flag="frame_scene",
     )
+
+    # 清空内存
+    gc.collect()
 
 
 def process_frame(
@@ -173,6 +222,7 @@ def process_frame(
     right_focal_len = right_sam3d_body_res[frame_idx]["focal_length"]
 
     # TODO: 因为相机的坐标系和kpt的坐标系需要同时移动，所以规范化的代码需要在外面
+    # UPDATE: 暂时不进行坐标系的移动了
     fused, diag = rigid_transform_3D(
         target=left_kpt_3d,
         source=right_kpt_3d,
@@ -189,32 +239,34 @@ def process_frame(
         diag["per_frame"][0]["t"],
     )
 
-    # sam 3d预测的，左、右相机中心
-    # 这里的任务需要把右相机从右人系，变换到世界系（左人系）
-
+    # 镜像翻转坐标系
+    # TODO：如果刚体变换的rt能用的话，就用右边相机变化之后的位置
     # * 右相机根据右人系坐标 + 右→左的相似变换，得到右世界系坐标
     # C_R_world = s * (R_RL @ C_R_person) + t_RL  # 右世界系
-    # ! 直接把plt的坐标转换为opencv的坐标系，不进行坐标层面的改变，只进行渲染层面的改变
-    C_L_world[1] = -C_L_world[1]
-    C_R_person = -C_R_person
-    C_R_world = C_R_person
 
-    # 因为plt的z反转了，所以这里也要反转一下kpt的z轴
-    fused[:, 2] = -fused[:, 2]
+    # ! 直接把的坐标转换为opencv的坐标系，不进行坐标层面的改变，只进行渲染层面的改变
+    C_L_world = C_L_world * np.array([1, -1, -1])  # 镜像翻转
+    C_R_world = C_R_person * np.array([-1, -1, -1])  # 镜像翻转
+
+    C_R_world[0] = -C_R_world[0]  # 关于 X 轴镜像
+    C_R_world[2] = -C_R_world[2]  # 关于 Z 轴镜像
+
+    # ! 因为的左右相机的Z反转了，所以这里也要反转一下kpt的z轴
+    # fused = fused * np.array([1, 1, -1])  # 镜像翻转
 
     # ---------- 画骨架图 ----------
     kpts_world = fused  # 直接把左视角的人当作世界里的骨架
 
-    plt_skeleton = skeleton_visualizer.draw_skeleton_3d(ax=None, points_3d=kpts_world)
+    _skeleton = skeleton_visualizer.draw_skeleton_3d(ax=None, points_3d=kpts_world)
 
-    out_skeleton = out_root / "fused"
-    out_skeleton.mkdir(parents=True, exist_ok=True)
-
-    plt_skeleton.savefig(out_skeleton / f"{frame_idx}.png", dpi=300)
+    skeleton_visualizer.save(
+        image=_skeleton,
+        save_path=out_root / "fused" / f"{frame_idx}.png",
+    )
 
     # ---------- 画场景图 ----------
     # TODO: 相机的位置还是有问题，会出现飘逸现象，需要进一步调试
-    plt_scene = scene_visualizer.draw_scene(
+    _scene = scene_visualizer.draw_scene(
         ax=None,
         kpts_world=kpts_world,
         C_L_world=C_L_world,
@@ -223,10 +275,10 @@ def process_frame(
         right_focal_length=right_focal_len,
     )
 
-    out_scene = out_root / "scene"
-    out_scene.mkdir(parents=True, exist_ok=True)
-
-    plt_scene.savefig(out_scene / f"{frame_idx}.png", dpi=300)
+    scene_visualizer.save(
+        image=_scene,
+        save_path=out_root / "scene" / f"{frame_idx}.png",
+    )
 
     # 画左右frame + scene
 
@@ -237,7 +289,7 @@ def process_frame(
         image=right_frame, keypoints=right_kpt_2d
     )
 
-    plt_frame_scene = scene_visualizer.draw_frame_with_scene(
+    _frame_scene = scene_visualizer.draw_frame_with_scene(
         left_frame=left_kpt_with_frame,
         right_frame=right_kpt_with_frame,
         pose_3d=kpts_world,
@@ -247,7 +299,9 @@ def process_frame(
         right_focal_length=right_focal_len,
     )
 
-    out_frame_scene = out_root / "frame_scene"
-    out_frame_scene.mkdir(parents=True, exist_ok=True)
+    scene_visualizer.save(
+        image=_frame_scene,
+        save_path=out_root / "frame_scene" / f"{frame_idx}.png",
+    )
 
-    plt_frame_scene.savefig(out_frame_scene / f"{frame_idx}.png", dpi=300)
+    return left_frame, right_frame, kpts_world, R_RL, t_RL

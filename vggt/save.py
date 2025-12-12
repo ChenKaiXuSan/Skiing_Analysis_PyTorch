@@ -83,7 +83,6 @@ def save_inference_results(
 # update 3d information to pt file
 def save_camera_info(
     out_pt_path: Path,
-    all_frame_x3d: list[np.ndarray],
     all_frame_camera_intrinsics: list[np.ndarray],
     all_frame_R: list[np.ndarray],
     all_frame_t: list[np.ndarray],
@@ -98,7 +97,6 @@ def save_camera_info(
     """
 
     data = {
-        "x3d_pose": np.stack(all_frame_x3d, axis=0),  # (N, J, 3)
         "camera_intrinsics": np.stack(
             all_frame_camera_intrinsics, axis=0
         ),  # (N, C, 3, 3)

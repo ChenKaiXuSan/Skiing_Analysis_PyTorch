@@ -1,5 +1,4 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-
+from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 
 import cv2
@@ -199,7 +198,8 @@ class SkeletonVisualizer:
         使用 Open3D 绘制 3D 关键点和骨架连线。
 
         Args:
-            points_3d (np.ndarray): N x 3 形状的 NumPy 数组，代表 3D 坐标 (x, y, z)。
+            points_3d (np.ndarray): N x 3 形状的
+             NumPy 数组，代表 3D 坐标 (x, y, z)。
             colors (Optional[np.ndarray]): N x 3 形状的 NumPy 数组，代表每个点的 RGB 颜色 (0.0 到 1.0)。
             link_colors (Optional[np.ndarray]): M x 3 形状的 NumPy 数组，代表每条连接线的 RGB 颜色 (0.0 到 1.0)。
             window_title (str): 可视化窗口的标题。
@@ -277,8 +277,8 @@ class SkeletonVisualizer:
                 )
 
         # 翻转 Z 轴显示方向
-        zmin, zmax = ax.get_zlim()
-        ax.set_zlim(zmax, zmin)  # 上下限调换
+        # zmin, zmax = ax.get_zlim()
+        # ax.set_zlim(zmax, zmin)  # 上下限调换
 
         ax.view_init(elev=-30, azim=270)
 
@@ -286,3 +286,20 @@ class SkeletonVisualizer:
 
         # 返回 Figure 对象，Notebook 会自动显示它
         return created_fig if created_fig is not None else ax
+
+    def save(
+        self,
+        image: plt.figure,
+        save_path: Path,
+    ):
+        """Save the drawn image to disk.
+
+        Args:
+            image (np.ndarray): The drawn image.
+            save_path (str): The path to save the image.
+        """
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        image.savefig(save_path, dpi=300)
+
+        plt.close(image)

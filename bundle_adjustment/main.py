@@ -1,14 +1,34 @@
-import os
 import logging
+import os
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
+from dataclasses import dataclass, field  # データ構造を明確にするために追加
 
-from bundle_adjustment.run import process_one_person
+from .run import process_one_person
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+# --------------------------------------------------------------------------- #
+# データ構造を定義
+# --------------------------------------------------------------------------- #
+@dataclass
+class SubjectData:
+    """各被写体のマルチビューデータを格納するデータクラス"""
+
+    subject_name: str
+    left_video: Path
+    right_video: Path
+    left_pt: Path
+    right_pt: Path
+    left_sam3d_body: Path
+    right_sam3d_body: Path
+    vggt_files: List[Path] = field(default_factory=list)
+    videopose3d_files: List[Path] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -82,142 +102,115 @@ def build_subject_map(
 )
 def main(cfg: DictConfig) -> None:
     # logging 设置（Hydra 也有自己的 logging 配置，这里做一个最简单的 fallback）
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    logger.setLevel(logging.INFO)
 
     logger.info("==== Config ====\n" + OmegaConf.to_yaml(cfg))
 
-    # -------------------------- 读取路径 -------------------------- #
-    video_root = Path(cfg.paths.video_path).resolve()
-    pt_root = Path(cfg.paths.pt_path).resolve()
-    vggt_root = Path(cfg.paths.vggt_path).resolve()
-    videopose3d_root = Path(cfg.paths.videopose3d_path).resolve()
-    sam3d_body_root = Path(cfg.paths.sam3d_body_path).resolve()
-    out_root = Path(cfg.paths.log_path).resolve()
+    # -------------------------- パスとパターンの設定 -------------------------- #
+    # データソースの設定を辞書にまとめ、繰り返し処理を可能にする
+    data_sources = [
+        (
+            "video",
+            cfg.paths.video_path,
+            ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"],
+        ),
+        ("pt", cfg.paths.pt_path, ["*.pt"]),
+        ("vggt", cfg.paths.vggt_path, ["*.npz"]),
+        ("videopose3d", cfg.paths.videopose3d_path, ["*.npz"]),
+        ("sam3d_body", cfg.paths.sam3d_body_path, ["*.npz"]),
+    ]
 
+    subject_maps: Dict[str, Dict[str, List[Path]]] = {}
+    all_subject_names = set()
+    recursive = bool(cfg.dataset.get("recursive", False))
+    out_root = Path(cfg.paths.log_path).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
-    recursive = bool(cfg.dataset.get("recursive", False))
-
     # -------------------------- 扫描各类文件 -------------------------- #
-    vid_patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
-    pt_patterns = ["*.pt"]
-    npz_patterns = ["*.npz"]
+    for name, path_cfg, patterns in data_sources:
+        root_path = Path(path_cfg).resolve()
+
+        # subject_map を構築
+        subject_map = build_subject_map(root_path, patterns, recursive, name=name)
+        subject_maps[name] = subject_map
+
+        # 最初のデータソースで全被写体リストを初期化、それ以降は交差演算
+        if not all_subject_names:
+            all_subject_names.update(subject_map.keys())
+        else:
+            all_subject_names.intersection_update(subject_map.keys())
 
     # FIXME: vggt npy 和 videopose3d npy 的结构不一样，这里需要修改一下
     # video / pt / vggt / videopose3d 统一用一个工具函数构建映射
-    videos_map = build_subject_map(video_root, vid_patterns, recursive, name="video")
-    pts_map = build_subject_map(pt_root, pt_patterns, recursive, name="pt")
-    vggt_map = build_subject_map(vggt_root, npz_patterns, recursive, name="vggt")
-    videopose3d_map = build_subject_map(
-        videopose3d_root, npz_patterns, recursive, name="videopose3d"
-    )
-    sam3d_body_map = build_subject_map(
-        sam3d_body_root, npz_patterns, recursive, name="sam3d_body"
-    )
-
-    # -------------------------- 构建 multi-view 任务 -------------------------- #
     logger.info("Matching multi-view data for each subject...")
 
-    # 如果你希望只有“video+pt+vggt+videopose3d 都存在”的 subject 才处理，
-    # 就用四者交集；如果只要 video+pt 就行，可以改成前两者交集。
-    subjects = sorted(
-        set(videos_map.keys())
-        & set(pts_map.keys())
-        & set(vggt_map.keys())
-        & set(videopose3d_map.keys())
-    )
+    subjects = sorted(list(all_subject_names))
 
     if not subjects:
+        # エラーメッセージを短く、かつ情報量が多くなるように改善
         raise ValueError(
-            "没有任何 subject 同时包含 video / pt / vggt / videopose3d 文件"
+            "No subjects found that contain files for ALL required modalities: "
+            f"{[name for name, _, _ in data_sources]}"
         )
 
     logger.info(f"Total matched subjects (with all modalities): {len(subjects)}")
 
-    # multi_pairs: 每个元素 = (subject_name, left_v, right_v, left_pt, right_pt)
-    multi_pairs: List[Tuple[str, Path, Path, Path, Path, List[Path], List[Path]]] = []
+    # -------------------------- 构建 multi-view 任务 -------------------------- #
+    logger.info("Matching multi-view data for each subject...")
+
+    # SubjectData クラスを使用してペアを構築
+    multi_pairs: List[SubjectData] = []
 
     for subject_name in subjects:
-        vids = videos_map[subject_name]
-        pts = pts_map[subject_name]
-        sam3d_body_files = sam3d_body_map[subject_name]
+        # すべての subject_map からデータを取得
+        vids = subject_maps["video"].get(subject_name, [])
+        pts = subject_maps["pt"].get(subject_name, [])
+        sam3d_body_files = subject_maps["sam3d_body"].get(subject_name, [])
+        vggt_files = subject_maps["vggt"].get(subject_name, [])
+        videopose3d_files = subject_maps["videopose3d"].get(subject_name, [])
 
-        # 多视角：至少 2 个 video + 2 个 pt
         # 约定：vids[1]/pts[1] 为 left，vids[0]/pts[0] 为 right
-        if len(vids) >= 2 and len(pts) >= 2:
-            # 如果你希望更稳定一些，可以先按文件名排序（find_files 已经返回排序结果）
-            left_v, right_v = vids[1], vids[0]
-            left_pt, right_pt = pts[1], pts[0]
-            vggt_files = vggt_map[subject_name]
-            videopose3d_files = videopose3d_map[subject_name]
-            left_sam3d_body = sam3d_body_files[1]
-            right_sam3d_body = sam3d_body_files[0]
-
-            multi_pairs.append(
-                (
-                    subject_name,
-                    left_v,
-                    right_v,
-                    left_pt,
-                    right_pt,
-                    left_sam3d_body,
-                    right_sam3d_body,
-                    vggt_files,
-                    videopose3d_files,
-                )
+        multi_pairs.append(
+            SubjectData(
+                subject_name=subject_name,
+                left_video=vids[1],
+                right_video=vids[0],
+                left_pt=pts[1],
+                right_pt=pts[0],
+                left_sam3d_body=sam3d_body_files[1],
+                right_sam3d_body=sam3d_body_files[0],
+                vggt_files=vggt_files,
+                videopose3d_files=videopose3d_files,
             )
-        else:
-            logger.warning(
-                f"[Skip] {subject_name}: need >= 2 videos and >= 2 pts for multi-view "
-                f"(got {len(vids)} videos, {len(pts)} pts)"
-            )
-
-    logger.info(f"Total multi-view pairs: {len(multi_pairs)}")
+        )
 
     if not multi_pairs:
         logger.info("No valid multi-view pairs found. EXIT.")
         logger.info("==== ALL DONE ====")
         return
 
-    # -------------------------- 顺序执行（无多线程） -------------------------- #
+    # -------------------------- 顺序执行 -------------------------- #
 
-    for (
-        subject_name,
-        left_v,
-        right_v,
-        left_pt,
-        right_pt,
-        left_sam3d_body,
-        right_sam3d_body,
-        vggt_files,
-        videopose3d_files,
-    ) in multi_pairs:
+    for pair in multi_pairs:
         logger.info(
-            f"[Subject: {subject_name}] Multi-view START\n"
-            f"  left_v : {left_v}\n"
-            f"  right_v: {right_v}\n"
-            f"  left_pt: {left_pt}\n"
-            f"  right_pt: {right_pt}\n"
-            f"  vggt_files: {vggt_files}\n"
-            f"  videopose3d_files: {videopose3d_files}"
+            f"[Subject: {pair.subject_name}] Multi-view START\n"
+            f"  left_v : {pair.left_video}\n"
+            f"  right_v: {pair.right_video}\n"
+            f"  left_pt: {pair.left_pt}\n"
+            f"  right_pt: {pair.right_pt}\n"
+            f"  vggt_files: {pair.vggt_files}\n"
+            f"  videopose3d_files: {pair.videopose3d_files}"
         )
 
-        out_dir = process_one_person(
-            left_video_path=left_v,
-            left_pt_path=left_pt,
-            left_sam3d_body_path=left_sam3d_body,
-            right_video_path=right_v,
-            right_pt_path=right_pt,
-            right_sam3d_body_path=right_sam3d_body,
-            vggt_files=vggt_files,
-            videopose3d_files=videopose3d_files,
-            out_root=out_root / subject_name,
-            cfg=cfg,
+        process_one_person(
+            left_video_path=pair.left_video,
+            left_pt_path=pair.left_pt,
+            left_sam3d_body_path=pair.left_sam3d_body,
+            right_video_path=pair.right_video,
+            right_pt_path=pair.right_pt,
+            right_sam3d_body_path=pair.right_sam3d_body,
+            vggt_files=pair.vggt_files,
+            videopose3d_files=pair.videopose3d_files,
+            out_root=out_root / pair.subject_name,
         )
 
 

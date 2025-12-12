@@ -17,6 +17,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from .multi_view_process import process_multi_view_video
+from .single_view_process import process_single_view_video
 
 logger = logging.getLogger(__name__)
 
@@ -150,16 +151,32 @@ def main(cfg: DictConfig) -> None:
     # ---------------------------------------------------------------------- #
     for subject_name, left_v, right_v, left_pt, right_pt in multi_pairs:
         logger.info(f"[Subject: {subject_name}] Multi-view START")
-        out_dir = process_multi_view_video(
-            left_video_path=left_v,
-            left_pt_path=left_pt,
-            right_video_path=right_v,
-            right_pt_path=right_pt,
-            out_root=log_out_root,
+        # out_dir = process_multi_view_video(
+        #     left_video_path=left_v,
+        #     left_pt_path=left_pt,
+        #     right_video_path=right_v,
+        #     right_pt_path=right_pt,
+        #     out_root=log_out_root,
+        #     inference_output_path=inference_output_path,
+        #     cfg=cfg,
+        # )
+
+        out_dir = process_single_view_video(
+            video_path=left_v,
+            pt_path=left_pt,
+            out_root=log_out_root / "left_view",
             inference_output_path=inference_output_path,
             cfg=cfg,
-        )
-        
+        )  # Process left view
+
+        out_dir = process_single_view_video(
+            video_path=right_v,
+            pt_path=right_pt,
+            out_root=log_out_root / "right_view",
+            inference_output_path=inference_output_path,
+            cfg=cfg,
+        )  # Process right view
+
         if out_dir is None:
             logger.error(f"[Subject: {subject_name}] Multi-view FAILED (None out_dir)")
 

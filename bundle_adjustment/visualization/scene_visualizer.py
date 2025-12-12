@@ -7,8 +7,8 @@ Created Date: Sunday December 7th 2025
 Author: Kaixu Chen
 -----
 Comment:
-以人物为世界中心
-左相机
+以人物的地面为世界中心
+左相机默认的pred cam t
 右相机是按照刚体对其准的
 
 相机看向人物中心，根据focal_length计算FOV
@@ -25,6 +25,7 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
+from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -68,9 +69,6 @@ class SceneVisualizer:
         self.pose_meta = {}
         self.skeleton = None
 
-        self.fig = None
-        self.ax = None
-
     def set_pose_meta(self, pose_meta: Dict):
         parsed_meta = parse_pose_metainfo(pose_meta)
 
@@ -86,7 +84,7 @@ class SceneVisualizer:
     ):
         """
         C       : (3,) 相机中心（世界系）
-        forward : (3,) 相机朝向（需要归一化），例如朝向人物原点的方向
+        forward : (3,) 相机朝向
         up      : (3,) 粗略的“向上”方向向量
         fov_deg : 视野角度（大概给个 60° 即可）
         depth   : 视锥体长度（看多远）
@@ -125,6 +123,7 @@ class SceneVisualizer:
             ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]], color=color)
 
     def draw_camera_axes(self, ax, C, R, length=0.1):
+        # TODO: 现在的R还不知道，只是假设的
         """
         在 3D 里画相机坐标系的三个轴
         C : (3,) 相机中心（世界系）
@@ -163,14 +162,14 @@ class SceneVisualizer:
 
     def calculate_fov_deg(self, focal_length, image_dimension):
         """
-        焦点距離 (f) と画像の次元 (W または H) から画角 (FOV) を計算する。
+        根据焦距和图像尺寸计算视角。
 
         Args:
-            focal_length (float): 焦点距離 (ピクセル単位)
-            image_dimension (int): 計算したい方向の画像の幅または高さ (ピクセル単位)
+            focal_length (float): 相机的焦距 (像素单位)
+            image_dimension (int): 计算方向上的图像宽度或高度 (像素单位)
 
         Returns:
-            float: 画角 (度数 / deg)
+            float: 视角 (度数单位)
         """
         # 式: 2 * arctan((Dimension / 2) / focal_length)
         fov_rad = 2 * np.arctan(image_dimension / (2 * focal_length))
@@ -190,6 +189,8 @@ class SceneVisualizer:
         left_focal_length: np.ndarray,
         right_focal_length: np.ndarray,
         frustum_depth=0.5,
+        elev=-30,
+        azim=270,
     ):
         """
         在给定的 ax 上画 3D 场景；如果 ax 为 None，则自己新建 fig+ax。
@@ -200,7 +201,7 @@ class SceneVisualizer:
 
         created_fig = None
         if ax is None:
-            created_fig = plt.figure(figsize=(6, 6))
+            created_fig = plt.figure(figsize=(15, 15))
             ax = created_fig.add_subplot(111, projection="3d")
 
         # --- 颜色处理 ---
@@ -244,9 +245,9 @@ class SceneVisualizer:
                     alpha=self.alpha,
                 )
 
-        # 标记骨盆为原点（假设 0 是骨盆）
+        # 标记世界坐标系原点
         ax.scatter([0], [0], [0], s=60)
-        ax.text(0, 0, 0, "pelvis(0,0,0)")
+        ax.text(0, 0, 0, "world center (0,0,0)")
 
         # --- 2. 左相机 ---
         ax.scatter(
@@ -326,10 +327,10 @@ class SceneVisualizer:
         ax.set_zlabel("Z")
 
         # 翻转 Z 轴显示方向
-        zmin, zmax = ax.get_zlim()
-        ax.set_zlim(zmax, zmin)
+        # zmin, zmax = ax.get_zlim()
+        # ax.set_zlim(zmax, zmin)
 
-        ax.view_init(elev=-30, azim=270)
+        ax.view_init(elev=elev, azim=azim)
 
         return created_fig if created_fig is not None else ax
 
@@ -347,10 +348,10 @@ class SceneVisualizer:
         """
         渲染一个 frame：左图+右图+3D pose，并返回 figure。
         """
-        # 每次调用新建一个 figure，避免和之前的 self.ax 冲突
-        fig = plt.figure(figsize=(10, 8))
+
+        fig = plt.figure(figsize=(15, 15))
         fig.suptitle(f"Frame {frame_num}")
-        gs = GridSpec(2, 2, figure=fig)
+        gs = GridSpec(2, 3, figure=fig)
 
         # -------- 左视角 ---------- #
         axL = fig.add_subplot(gs[0, 0])
@@ -365,16 +366,80 @@ class SceneVisualizer:
         axR.set_title("Right view")
 
         # -------- 3D pose ---------- #
-        ax_3d = fig.add_subplot(gs[:, 1], projection="3d")
-        ax_3d.set_title("3D Scene")
+        ax_3d_left = fig.add_subplot(gs[0, 1], projection="3d")
+        ax_3d_left.set_title("left side view")
         self.draw_scene(
             kpts_world=pose_3d,
             C_L_world=C_L_world,
             C_R_world=C_R_world,
             left_focal_length=left_focal_length,
             right_focal_length=right_focal_length,
-            ax=ax_3d,
+            ax=ax_3d_left,
+            elev=-60,
+            azim=-90,
+        )
+
+        ax_3d_right = fig.add_subplot(gs[1, 1], projection="3d")
+        ax_3d_right.set_title("right side view")
+        self.draw_scene(
+            kpts_world=pose_3d,
+            C_L_world=C_L_world,
+            C_R_world=C_R_world,
+            left_focal_length=left_focal_length,
+            right_focal_length=right_focal_length,
+            ax=ax_3d_right,
+            elev=130,
+            azim=90,
+        )
+
+        ax_3d_top_left = fig.add_subplot(gs[0, 2], projection="3d")
+        ax_3d_top_left.set_title("top left view")
+        self.draw_scene(
+            kpts_world=pose_3d,
+            C_L_world=C_L_world,
+            C_R_world=C_R_world,
+            left_focal_length=left_focal_length,
+            right_focal_length=right_focal_length,
+            ax=ax_3d_top_left,
+            elev=0,
+            azim=-90,
+        )
+
+        ax_3d_top_right = fig.add_subplot(gs[1, 2], projection="3d")
+        ax_3d_top_right.set_title("top right view")
+        self.draw_scene(
+            kpts_world=pose_3d,
+            C_L_world=C_L_world,
+            C_R_world=C_R_world,
+            left_focal_length=left_focal_length,
+            right_focal_length=right_focal_length,
+            ax=ax_3d_top_right,
+            elev=180,
+            azim=90,
         )
 
         fig.tight_layout()
         return fig
+
+    def save(
+        self,
+        image: plt.figure,
+        save_path: Path,
+    ):
+        """Save the drawn image to disk.
+
+        Args:
+            image (np.ndarray): The drawn image.
+            save_path (str): The path to save the image.
+        """
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # image.savefig(save_path, dpi=300)
+        image.savefig(
+            save_path,
+            dpi=300,
+            facecolor="white",  # 背景白
+            edgecolor="white",
+        )
+
+        plt.close(image)

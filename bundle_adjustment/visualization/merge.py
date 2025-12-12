@@ -23,33 +23,85 @@ Date      	By	Comments
 import logging
 from pathlib import Path
 
-import cv2
+import imageio
+import imageio.v2 as imageio
+import numpy as np
+from PIL import Image  # 用来 resize，不用 cv2
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+def _ensure_rgb_uint8(img: np.ndarray) -> np.ndarray:
+    """把任意 imageio 读出的图像变成 (H, W, 3) uint8"""
+    if img is None:
+        raise ValueError("Got None image")
 
-def merge_frame_to_video(save_path: Path, flag: str) -> None:
-    _save_path = save_path / flag
-    _out_path = save_path / "video"
+    img = np.asarray(img)
 
-    frames = sorted(list(_save_path.iterdir()), key=lambda x: int(x.stem.split("_")[0]))
+    # 灰度图 (H, W)
+    if img.ndim == 2:
+        img = np.stack([img] * 3, axis=-1)
 
-    if not _out_path.exists():
-        _out_path.mkdir(parents=True, exist_ok=True)
+    # (H, W, C)
+    elif img.ndim == 3:
+        if img.shape[2] == 1:
+            img = np.concatenate([img] * 3, axis=-1)
+        elif img.shape[2] == 4:
+            # 丢掉 alpha 通道
+            img = img[:, :, :3]
+        elif img.shape[2] == 3:
+            pass
+        else:
+            raise ValueError(f"Unsupported channel number: {img.shape}")
 
-    first_frame = cv2.imread(str(frames[0]))
-    height, width, _ = first_frame.shape
+    else:
+        raise ValueError(f"Unsupported image shape: {img.shape}")
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(
-        str(_out_path / (flag + ".mp4")), fourcc, 30.0, (width, height)
+    # 转成 uint8
+    if img.dtype != np.uint8:
+        img = img.astype(np.uint8)
+
+    return img
+
+
+def merge_frame_to_video(save_path: Path, flag: str, fps: int = 30) -> None:
+    frame_dir = save_path / flag
+    out_path = save_path / "video"
+    out_path.mkdir(exist_ok=True, parents=True)
+
+    frames = sorted(frame_dir.glob("*"), key=lambda x: int(x.stem.split("_")[0]))
+    if not frames:
+        raise RuntimeError(f"No frames found in {frame_dir}")
+
+    output_file = out_path / f"{flag}.mp4"
+
+    # 先读一帧，确定尺寸
+    first_img = imageio.imread(frames[0])
+    first_img = _ensure_rgb_uint8(first_img)
+    H, W = first_img.shape[:2]
+
+    # 强制用 FFMPEG 后端，指定 codec
+    writer = imageio.get_writer(
+        output_file,
+        fps=fps,
+        format="FFMPEG",
+        codec="libx264",  # 如果报错可以换 "mpeg4"
     )
 
-    for f in tqdm(frames, desc=f"Save {flag}", total=len(frames)):
-        img = cv2.imread(str(f))
-        out.write(img)
+    # 先写入第一帧
+    writer.append_data(first_img)
 
-    out.release()
+    for f in tqdm(frames[1:], desc=f"Save {flag}"):
+        img = imageio.imread(f)
+        img = _ensure_rgb_uint8(img)
 
-    logger.info(f"Video saved to {_out_path / (flag + '.mp4')}")
+        # 如果尺寸不一致，resize 到第一帧大小
+        if img.shape[0] != H or img.shape[1] != W:
+            img_pil = Image.fromarray(img)
+            img_pil = img_pil.resize((W, H), Image.BILINEAR)
+            img = np.asarray(img_pil)
+
+        writer.append_data(img)
+
+    writer.close()
+    print(f"Video saved to {output_file}")
