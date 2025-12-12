@@ -83,6 +83,16 @@
       "args": [
         "infer.gpu=0"
       ]
+    },
+    {
+      "name": "front_bev",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "front.main",
+      "cwd": "/workspace/code",
+      "python": "/opt/conda/bin/python",
+      "console": "integratedTerminal",
+      "args": []
     }
   ]
 }
