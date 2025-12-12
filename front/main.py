@@ -140,7 +140,7 @@ def main(cfg: DictConfig) -> None:
         ("vggt", cfg.paths.vggt_path, ["*.npz"]),
         ("videopose3d", cfg.paths.videopose3d_path, ["*.npz"]),
         ("sam3d_body", cfg.paths.sam3d_body_path, ["*.npz"]),
-        ("front_sam3_results", cfg.paths.sam3_path, ["*.npz"]),
+        ("front_sam3_results", cfg.paths.sam3_path, ["*.npy"]),
     ]
 
     subject_maps: Dict[str, Dict[str, List[Path]]] = {}

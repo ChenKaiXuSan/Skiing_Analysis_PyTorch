@@ -88,7 +88,35 @@ def prepare_front_results(video_path: Path, output_dir: Path):
     for frame_idx, outputs in outputs_per_frame.items():
         outputs["frame"] = video_frames[frame_idx]
 
-    np.save(output_dir / "sam3_outputs.npz", outputs_per_frame)
+    _out_dir = str(output_dir / "sam3_person")
+    np.save(_out_dir, outputs_per_frame)
+
+    # find snow edge from sam3
+    # note: in case you already ran one text prompt and now want to switch to another text prompt
+    # it's required to reset the session first (otherwise the results would be wrong)
+    _ = predictor.handle_request(
+        request=dict(
+            type="reset_session",
+            session_id=session_id,
+        )
+    )
+
+    prompt_text_str = "snow"
+    frame_idx = 0
+    response = predictor.handle_request(
+        request=dict(
+            type="add_prompt",
+            session_id=session_id,
+            text=prompt_text_str,
+            frame_index=frame_idx,
+        )
+    )
+
+    outputs_per_frame = propagate_in_video(predictor, session_id)
+
+    # save results
+    _out_dir = str(output_dir / "sam3_snow")
+    np.save(_out_dir, outputs_per_frame)
 
     #
     # finally, close the inference session to free its GPU resources

@@ -21,10 +21,13 @@ Date      	By	Comments
 """
 
 from pathlib import Path
-import torch
+from typing import Tuple
+
+import cv2
 import numpy as np
-from .load import load_info
+
 from .bev_utils import make_bev
+from .load import load_info
 
 
 def _convert_xywh_to_xyxy(bboxes_xywh: np.ndarray) -> np.ndarray:
@@ -45,6 +48,33 @@ def _convert_xywh_to_xyxy(bboxes_xywh: np.ndarray) -> np.ndarray:
     return bboxes_xyxy
 
 
+def _unnormalize_bbox(bbox: np.ndarray, img_size: Tuple[int, int]) -> np.ndarray:
+    """
+    将归一化 bbox 还原为像素坐标
+
+    Args:
+        bbox: (..., 4) 归一化 bbox
+              支持格式: [x1, y1, x2, y2]，范围 [0,1]
+        img_size: (H, W)
+
+    Returns:
+        bbox_px: (..., 4) 像素坐标 bbox [x1, y1, x2, y2]
+    """
+    bbox = np.asarray(bbox, dtype=np.float64)
+    H, W = img_size
+
+    if bbox.shape[-1] != 4:
+        raise ValueError(f"bbox last dim must be 4, got {bbox.shape}")
+
+    bbox_px = bbox.copy()
+    bbox_px[..., 0] *= W  # x1
+    bbox_px[..., 2] *= W  # x2
+    bbox_px[..., 1] *= H  # y1
+    bbox_px[..., 3] *= H  # y2
+
+    return bbox_px
+
+
 def process_one_person(subject_data, video_path: Path, output_dir: Path):
     """处理单个被试的数据的主函数占位符
 
@@ -60,14 +90,19 @@ def process_one_person(subject_data, video_path: Path, output_dir: Path):
 
     for frame_idx, info in data.items():
         image = info["frame"]  # np.ndarray, (H,W,3)
-        bbox_xyxy = info["out_bbox_xyxy"]  # np.ndarray, (4,) xyxy
-        process_one_frame(image, bbox_xyxy, output_dir=output_dir)
+        bbox_xyxy = info["out_boxes_xywh"]  # np.ndarray, (4,) xyxy
+        obj_ids = info.get("out_obj_ids", None)
+        probs = info.get("out_probs", None)
+        binary_masks = info.get("out_binary_masks")
+
+        process_one_frame(image, bbox_xyxy, output_dir=output_dir, frame_idx=frame_idx)
 
 
 def process_one_frame(
     image: np.ndarray,
     bbox_xywh: np.ndarray,
-    output_dir: Path = None,
+    output_dir: Path,
+    frame_idx: int
 ):
     """处理单帧图像的主函数占位符
 
@@ -80,6 +115,11 @@ def process_one_frame(
     """
 
     img = image
+    H, W = 1080, 1920
     bbox_xyxy = _convert_xywh_to_xyxy(bbox_xywh)  # np.ndarray
+    
+    bbox_xyxy = _unnormalize_bbox(bbox_xyxy, (H, W))
 
-    make_bev(img, bbox_xyxy, out_path=output_dir)
+    # reshap img 
+    img = cv2.resize(img, (W, H))   # (W, H)
+    make_bev(img=img, bboxes_xyxy=bbox_xyxy, out_dir=output_dir / f"frame{frame_idx}")

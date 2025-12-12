@@ -36,7 +36,7 @@ def _load_npz(file_path: str) -> Dict[str, Any]:
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Missing file: {file_path}")
     logger.info(f"Loading: {file_path}")
-    return dict(np.load(file_path, allow_pickle=True))
+    return dict(np.load(file_path, allow_pickle=True).item())
 
 
 def load_info(

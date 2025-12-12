@@ -1,17 +1,13 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional
 
 import cv2
 import numpy as np
 
-# ==================================================
-# Utils
-# ==================================================
 
-
+# ---------------- Utils (你原来的保持不变，只略) ----------------
 def foot_from_bbox_xyxy(bbox: np.ndarray) -> np.ndarray:
-    """bbox: [x1,y1,x2,y2] -> bottom-center (u,v)"""
     bbox = np.asarray(bbox, dtype=np.float64).reshape(-1)
     if bbox.shape[0] != 4:
         raise ValueError(f"bbox must have 4 numbers, got {bbox.shape}")
@@ -20,7 +16,6 @@ def foot_from_bbox_xyxy(bbox: np.ndarray) -> np.ndarray:
 
 
 def image_points_to_bev(uv: np.ndarray, H: np.ndarray, eps: float = 1e-8) -> np.ndarray:
-    """(N,2) uv -> (N,2) XY using homography image->BEV."""
     uv = np.asarray(uv, dtype=np.float64)
     H = np.asarray(H, dtype=np.float64)
 
@@ -29,36 +24,21 @@ def image_points_to_bev(uv: np.ndarray, H: np.ndarray, eps: float = 1e-8) -> np.
     if H.shape != (3, 3):
         raise ValueError(f"H shape must be (3,3), got {H.shape}")
     if not np.isfinite(H).all():
-        raise ValueError("H contains NaN/Inf")
+        raise ValueError("H contains NaN or Inf")
 
-    ones = np.ones((uv.shape[0], 1), dtype=np.float64)
-    uv_h = np.concatenate([uv, ones], axis=1)  # (N,3)
-
-    bev_h = (H @ uv_h.T).T  # (N,3)
+    uv_h = np.concatenate([uv, np.ones((uv.shape[0], 1), dtype=np.float64)], axis=1)
+    bev_h = (H @ uv_h.T).T
     z = bev_h[:, 2:3]
     if np.any(np.abs(z) < eps):
         raise RuntimeError("Homogeneous coordinate too close to zero (bad H or points)")
-
-    xy = bev_h[:, :2] / z
-    return xy
+    return bev_h[:, :2] / z
 
 
 def warp_image_to_bev(
-    image: np.ndarray,
-    H: np.ndarray,
-    bev_size: Tuple[int, int],
-    interpolation: int = cv2.INTER_LINEAR,
+    image: np.ndarray, H: np.ndarray, bev_size: Tuple[int, int]
 ) -> np.ndarray:
-    """Warp full image to BEV canvas."""
-    if image is None:
-        raise ValueError("Input image is None")
-
-    H = np.asarray(H, dtype=np.float64)
-    if H.shape != (3, 3):
-        raise ValueError(f"H shape must be (3,3), got {H.shape}")
-
     bev_w, bev_h = bev_size
-    return cv2.warpPerspective(image, H, (bev_w, bev_h), flags=interpolation)
+    return cv2.warpPerspective(image, H, (bev_w, bev_h), flags=cv2.INTER_LINEAR)
 
 
 def draw_points(
@@ -80,42 +60,37 @@ def draw_points(
     return out
 
 
+def hconcat_resize(img_left: np.ndarray, img_right: np.ndarray) -> np.ndarray:
+    h = min(img_left.shape[0], img_right.shape[0])
+
+    def resize_by_height(img, target_h):
+        scale = target_h / img.shape[0]
+        w = int(img.shape[1] * scale)
+        return cv2.resize(img, (w, target_h))
+
+    return cv2.hconcat([resize_by_height(img_left, h), resize_by_height(img_right, h)])
+
+
 def check_homography(H: np.ndarray) -> None:
-    """Basic sanity checks."""
     if H is None or H.shape != (3, 3):
         raise ValueError("H is invalid")
     if not np.isfinite(H).all():
         raise ValueError("H contains NaN/Inf")
-    det = np.linalg.det(H)
-    if abs(det) < 1e-12:
-        raise ValueError(f"H is near-singular, det={det}")
+    if abs(np.linalg.det(H)) < 1e-12:
+        raise ValueError("H is near-singular")
 
 
-# ==================================================
-# Config
-# ==================================================
-
-
+# ---------------- Config ----------------
 @dataclass
 class BeVConfig:
-    # Snow lane size (meters)
-    lane_width_m: float = 30.0  # X range: [-15, +15]
-    lane_length_m: float = 60.0  # Y range: [0, 60]
-
-    # Canvas scale: pixels per meter
+    lane_width_m: float = 30.0
+    lane_length_m: float = 60.0
     px_per_m: float = 20.0
-
-    # Extra margin in BEV to avoid cropping near camera / edges
     margin_x_m: float = 5.0
-    margin_y_m: float = 10.0  # extend toward camera and far end
+    margin_y_m: float = 10.0
 
 
 def make_bev_canvas(cfg: BeVConfig) -> Tuple[Tuple[int, int], np.ndarray]:
-    """
-    关键点：你计算出来的 H 是 image->(X,Y)(米).
-    但 warpPerspective 需要映射到像素画布(0..Wpx,0..Hpx).
-    所以要再乘一个 S，把米坐标变成像素坐标。
-    """
     Xmin = -cfg.lane_width_m / 2 - cfg.margin_x_m
     Xmax = +cfg.lane_width_m / 2 + cfg.margin_x_m
     Ymin = 0.0 - cfg.margin_y_m
@@ -124,9 +99,6 @@ def make_bev_canvas(cfg: BeVConfig) -> Tuple[Tuple[int, int], np.ndarray]:
     bev_w_px = int(np.ceil((Xmax - Xmin) * cfg.px_per_m))
     bev_h_px = int(np.ceil((Ymax - Ymin) * cfg.px_per_m))
 
-    # S maps meters (X,Y) to pixel (x,y)
-    # x = (X - Xmin) * s
-    # y = (Ymax - Y) * s   (让 BEV 图像上方是远处，下方是近处，更直观)
     s = cfg.px_per_m
     S = np.array(
         [
@@ -136,135 +108,151 @@ def make_bev_canvas(cfg: BeVConfig) -> Tuple[Tuple[int, int], np.ndarray]:
         ],
         dtype=np.float64,
     )
-
     return (bev_w_px, bev_h_px), S
 
 
-def hconcat_resize(img_left, img_right):
+# ---------------- Main API ----------------
+def make_bev(
+    img: np.ndarray,
+    bboxes_xyxy: np.ndarray,
+    out_dir: Path,
+    img_pts: Optional[np.ndarray] = None,
+    cfg: BeVConfig = BeVConfig(),
+    debug_show: bool = False,
+) -> None:
     """
-    将两张图按高度对齐后横向拼接
+    Args:
+        img: (H,W,3) BGR
+        bboxes_xyxy: (N,4) or (4,)
+        out_dir: output folder
+        img_pts: (4,2) 手动标定的地面像素点（near-left, near-right, far-right, far-left）
+        cfg: BEV config
+        debug_show: 是否imshow（服务器建议False）
     """
-    h = min(img_left.shape[0], img_right.shape[0])
-
-    def resize_by_height(img, target_h):
-        scale = target_h / img.shape[0]
-        w = int(img.shape[1] * scale)
-        return cv2.resize(img, (w, target_h))
-
-    img_left_r = resize_by_height(img_left, h)
-    img_right_r = resize_by_height(img_right, h)
-
-    return cv2.hconcat([img_left_r, img_right_r])
-
-
-# ==================================================
-# Main demo
-# ==================================================
-
-
-def make_bev(img: np.ndarray, bbox: np.ndarray, out_path: Path) -> None:
-    cfg = BeVConfig()
-
-    # ----------------------------
-    # 0) Load image
-    # ----------------------------
     if img is None:
-        raise FileNotFoundError("Failed to load ski.png")
-    H_img, W_img = img.shape[:2]
+        raise ValueError("img is None")
 
-    # ----------------------------
-    # 1) Your picked pixel points (must be on ground!)
-    #    ORDER: near-left, near-right, far-right, far-left
-    # ----------------------------
-    img_pts = np.array(
-        [
-            [0, 1080],  # near-left  (⚠️最好换成雪道左边界的地面点)
-            [1920, 1080],  # near-right (⚠️最好换成雪道右边界的地面点)
-            [1336, 130],  # far-right
-            [600, 130],  # far-left
-        ],
-        dtype=np.float32,
-    )
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Basic bounds check
-    if (
-        np.any(img_pts[:, 0] < 0)
-        or np.any(img_pts[:, 0] > W_img + 5)
-        or np.any(img_pts[:, 1] < 0)
-        or np.any(img_pts[:, 1] > H_img + 5)
-    ):
-        print("⚠️ Warning: some img_pts are outside image size. Double-check.")
+    # --------- 标定点默认值（你务必换成真实雪道地面点） ----------
+    if img_pts is None:
+        img_pts = np.array(
+            [
+                [0, 1080],
+                [1920, 1080],
+                [1336, 130],
+                [600, 130],
+            ],
+            dtype=np.float32,
+        )
+    else:
+        img_pts = np.asarray(img_pts, dtype=np.float32)
+        if img_pts.shape != (4, 2):
+            raise ValueError(f"img_pts must be (4,2), got {img_pts.shape}")
 
-    # ----------------------------
-    # 2) World points in meters (60m x 30m)
-    # ----------------------------
+    # --------- 固定 BEV 世界点（米） ----------
     bev_pts_m = np.array(
         [
-            [-15.0, 0.0],  # near-left
-            [15.0, 0.0],  # near-right
-            [15.0, 60.0],  # far-right
-            [-15.0, 60.0],  # far-left
+            [-15.0, 0.0],
+            [15.0, 0.0],
+            [15.0, 60.0],
+            [-15.0, 60.0],
         ],
         dtype=np.float32,
     )
 
-    # ----------------------------
-    # 3) Homography: image -> meters
-    # ----------------------------
-    H_m, mask = cv2.findHomography(
-        img_pts, bev_pts_m, method=0
-    )  # 4点直接解，不用RANSAC
+    # --------- 只算一次 H ----------
+    H_m, _ = cv2.findHomography(img_pts, bev_pts_m, method=0)
     check_homography(H_m)
-    print("H (image -> meters) =\n", H_m)
 
-    # ----------------------------
-    # 4) For warping image: need image -> BEV pixel canvas
-    #    H_px = S * H_m
-    # ----------------------------
     bev_size, S = make_bev_canvas(cfg)
     H_px = S @ H_m
-    print("BEV canvas size (w,h) =", bev_size)
-    print("Saved: H_meters.npy, H_bev_px.npy")
 
-    # ----------------------------
-    # 5) Debug visualize selected points
-    # ----------------------------
-    dbg = draw_points(img, img_pts, color=(0, 0, 255))
-    cv2.imshow("Picked ground points", dbg)
-
-    # ----------------------------
-    # 6) Example: bbox -> foot -> meters -> bev pixel
-    # ----------------------------
-    bbox = bbox
-    foot_uv = foot_from_bbox_xyxy(bbox)[None, :]  # (1,2)
-
-    foot_xy_m = image_points_to_bev(foot_uv, H_m)[0]
-    print("Foot in meters (X,Y) =", foot_xy_m)
-
-    foot_xy_px = image_points_to_bev(foot_uv, H_px)[0]
-    print("Foot in BEV pixel (x,y) =", foot_xy_px)
-
-    # 原图调试图：标定点 + 脚点（绿）
-    dbg2 = draw_points(img, img_pts, color=(0, 0, 255))
-    fu, fv = foot_uv[0]
-    cv2.circle(dbg2, (int(round(fu)), int(round(fv))), 6, (0, 255, 0), -1)
-
-    # ----------------------------
-    # 7) Warp image to BEV (sanity check) -> bev_show
-    # ----------------------------
+    # --------- 只 warp 一次整图 ----------
     bev_img = warp_image_to_bev(img, H_px, bev_size)
 
-    bev_show = bev_img.copy()
-    x, y = foot_xy_px
-    cv2.circle(bev_show, (int(round(x)), int(round(y))), 6, (0, 0, 255), -1)
+    # 原图调试底图：标定点
+    src_base = draw_points(img, img_pts, color=(0, 0, 255))
+    if debug_show:
+        cv2.imshow("Picked ground points", src_base)
 
-    # ----------------------------
-    # Save images
-    # ----------------------------
-    cv2.imwrite(f"{out_path}/debug_src_points.png", dbg2)
-    cv2.imwrite(f"{out_path}/bev_result.png", bev_show)
+    # --------- 规范 bboxes ----------
+    bboxes_xyxy = np.asarray(bboxes_xyxy, dtype=np.float64)
+    if bboxes_xyxy.ndim == 1:
+        bboxes_xyxy = bboxes_xyxy[None, :]
+    if bboxes_xyxy.shape[1] != 4:
+        raise ValueError(f"bboxes_xyxy must be (N,4), got {bboxes_xyxy.shape}")
 
-    # 并排拼接（现在 bev_show 已经存在了）
-    pair = hconcat_resize(dbg2, bev_show)
-    cv2.imwrite(f"{out_path}/compare_src_bev.png", pair)
+    # --------- 对每个人画点并保存 ----------
+    for i, one_bbox in enumerate(bboxes_xyxy):
+        # --------- 统一的底图（只拷贝一次） ----------
+        dbg_all = src_base.copy()      # 原图 + 标定点
+        bev_all = bev_img.copy()       # BEV 底图
+
+        COLORS = [
+            (0, 255, 0),    # green
+            (0, 0, 255),    # red
+            (255, 0, 0),    # blue
+            (0, 255, 255),  # yellow
+            (255, 0, 255),  # magenta
+            (255, 255, 0),  # cyan
+        ]
+
+        # --------- 对每个人画点（画到同一张图上） ----------
+        for i, one_bbox in enumerate(bboxes_xyxy):
+            color = COLORS[i % len(COLORS)]
+
+            # foot point in image
+            foot_uv = foot_from_bbox_xyxy(one_bbox)
+            fu, fv = foot_uv
+            cv2.circle(
+                dbg_all,
+                (int(round(fu)), int(round(fv))),
+                6,
+                color,
+                -1,
+            )
+            cv2.putText(
+                dbg_all,
+                f"P{i}",
+                (int(fu) + 8, int(fv) - 8),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2,
+            )
+
+            # foot point in BEV
+            foot_xy_px = image_points_to_bev(foot_uv[None, :], H_px)[0]
+            x, y = foot_xy_px
+            cv2.circle(
+                bev_all,
+                (int(round(x)), int(round(y))),
+                6,
+                color,
+                -1,
+            )
+            cv2.putText(
+                bev_all,
+                f"P{i}",
+                (int(x) + 8, int(y) - 8),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2,
+            )
+
+        # --------- 并排拼接 ----------
+        pair = hconcat_resize(dbg_all, bev_all)
+
+        # --------- 保存 ----------
+        cv2.imwrite(str(out_dir / "debug_src_points_all.png"), dbg_all)
+        cv2.imwrite(str(out_dir / "bev_result_all.png"), bev_all)
+        cv2.imwrite(str(out_dir / "compare_src_bev_all.png"), pair)
+
+        # --------- 可视化 ----------
+        if debug_show:
+            cv2.imshow("Source | BEV (All Persons)", pair)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
 
