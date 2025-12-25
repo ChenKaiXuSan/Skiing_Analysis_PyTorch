@@ -77,15 +77,7 @@ def _unnormalize_bbox(bbox: np.ndarray, img_size: Tuple[int, int]) -> np.ndarray
 def process_front_frame(
     image: np.ndarray, bbox_xywh: np.ndarray, output_dir: Path, frame_idx: int
 ):
-    """处理单帧图像的主函数占位符
-
-    Args:
-        image: np.ndarray, (H,W,3)
-        bbox_xyxy: np.ndarray, (4,) xyxy
-
-    Returns:
-        None
-    """
+    """处理单帧图像的主函数占位符"""
 
     img = image
     H, W = 1080, 1920
@@ -95,6 +87,8 @@ def process_front_frame(
 
     # reshap img
     img = cv2.resize(img, (W, H))  # (W, H)
-    foot_xy_px = make_bev(img=img, bboxes_xyxy=bbox_xyxy, out_dir=output_dir / f"frame{frame_idx}")
+    foot_xy_px, raw_img, bev_img = make_bev(
+        img=img, bboxes_xyxy=bbox_xyxy, out_dir=output_dir / f"frame{frame_idx}"
+    )
 
-    return foot_xy_px
+    return foot_xy_px, raw_img, bev_img

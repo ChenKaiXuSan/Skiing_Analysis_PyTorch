@@ -118,7 +118,6 @@ def make_bev(
     out_dir: Path,
     img_pts: Optional[np.ndarray] = None,
     cfg: BeVConfig = BeVConfig(),
-    debug_show: bool = False,
 ) -> None:
     """
     Args:
@@ -173,8 +172,6 @@ def make_bev(
 
     # 原图调试底图：标定点
     src_base = draw_points(img, img_pts, color=(0, 0, 255))
-    if debug_show:
-        cv2.imshow("Picked ground points", src_base)
 
     # --------- 规范 bboxes ----------
     bboxes_xyxy = np.asarray(bboxes_xyxy, dtype=np.float64)
@@ -183,16 +180,17 @@ def make_bev(
     if bboxes_xyxy.shape[1] != 4:
         raise ValueError(f"bboxes_xyxy must be (N,4), got {bboxes_xyxy.shape}")
 
+    foot_xy_px_res = {}
     # --------- 对每个人画点并保存 ----------
     for i, one_bbox in enumerate(bboxes_xyxy):
         # --------- 统一的底图（只拷贝一次） ----------
-        dbg_all = src_base.copy()      # 原图 + 标定点
-        bev_all = bev_img.copy()       # BEV 底图
+        dbg_all = src_base.copy()  # 原图 + 标定点
+        bev_all = bev_img.copy()  # BEV 底图
 
         COLORS = [
-            (0, 255, 0),    # green
-            (0, 0, 255),    # red
-            (255, 0, 0),    # blue
+            (0, 255, 0),  # green
+            (0, 0, 255),  # red
+            (255, 0, 0),  # blue
             (0, 255, 255),  # yellow
             (255, 0, 255),  # magenta
             (255, 255, 0),  # cyan
@@ -224,6 +222,7 @@ def make_bev(
 
             # foot point in BEV
             foot_xy_px = image_points_to_bev(foot_uv[None, :], H_px)[0]
+            foot_xy_px_res[i] = foot_xy_px
             x, y = foot_xy_px
             cv2.circle(
                 bev_all,
@@ -250,11 +249,4 @@ def make_bev(
         cv2.imwrite(str(out_dir / "bev_result_all.png"), bev_all)
         cv2.imwrite(str(out_dir / "compare_src_bev_all.png"), pair)
 
-        # --------- 可视化 ----------
-        if debug_show:
-            cv2.imshow("Source | BEV (All Persons)", pair)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-
-    return foot_xy_px
-
+    return foot_xy_px_res, src_base, bev_img
