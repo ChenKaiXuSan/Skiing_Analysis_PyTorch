@@ -27,7 +27,7 @@ from typing import Dict, List
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
-from dataclasses import dataclass, field  # データ構造を明確にするために追加
+from dataclasses import dataclass, field
 
 from .run import process_one_person
 

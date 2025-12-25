@@ -29,24 +29,9 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from .load import load_front_info, load_sam_3d_body_results
-
-from .side.run import process_frame
-from .front.run import process_one_frame
-
-K = np.array(
-    [
-        1116.9289548941917,
-        0.0,
-        955.77175993563799,
-        0.0,
-        1117.3341496962166,
-        538.91061167202145,
-        0.0,
-        0.0,
-        1.0,
-    ]
-).reshape(3, 3)
+from .front.run import process_front_frame
+from .side.run import process_side_frame
+from .load import load_sam3_results, load_sam_3d_body_results
 
 
 def process_one_person(
@@ -62,17 +47,17 @@ def process_one_person(
     left_sam3d_body_res = load_sam_3d_body_results(left_sam3d_body_path.as_posix())
     right_sam3d_body_res = load_sam_3d_body_results(right_sam3d_body_path.as_posix())
 
-    front_sam3_res = load_front_info(front_sam3_results.as_posix())
+    front_sam3_res = load_sam3_results(front_sam3_results.as_posix())
 
     for frame_idx in tqdm(range(len(left_sam3d_body_res)), desc="Processing frames"):
         # if frame_idx > 60:
         #     break
 
-        left_frame, right_frame, kpts_world, R_RL, t_RL = process_frame(
+        left_frame, right_frame, kpts_world, R_RL, t_RL = process_side_frame(
             left_sam3d_body_res=left_sam3d_body_res,
             right_sam3d_body_res=right_sam3d_body_res,
             frame_idx=frame_idx,
-            out_root=output_dir,
+            out_root=output_dir / "side",
         )
 
         # process front view
@@ -82,8 +67,8 @@ def process_one_person(
         probs = front_sam3_res[frame_idx].get("out_probs", None)
         binary_masks = front_sam3_res[frame_idx].get("out_binary_masks")
         # foot point in bev pixels
-        foot_xy_px = process_one_frame(
-            image, bbox_xyxy, output_dir=output_dir, frame_idx=frame_idx
+        foot_xy_px = process_front_frame(
+            image, bbox_xyxy, output_dir=output_dir / "front", frame_idx=frame_idx
         )
 
         # merge side and front results here
@@ -100,4 +85,6 @@ def process_one_person(
 def merge(
     kpts_world: np.ndarray, foot_xy_px: np.ndarray, output_dir: Path, frame_idx: int
 ) -> None:
+    # merge side and front results
+
     pass

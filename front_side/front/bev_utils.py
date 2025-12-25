@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np

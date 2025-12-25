@@ -18,12 +18,9 @@ Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.c
 -----
 """
 
-import gc
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
-from tqdm import tqdm
 
 from .fuse.fuse import rigid_transform_3D
 
@@ -60,7 +57,7 @@ def setup_visualizer():
     return skeleton_visualizer, scene_visualizer
 
 
-def process_frame(
+def process_side_frame(
     left_sam3d_body_res,
     right_sam3d_body_res,
     frame_idx,

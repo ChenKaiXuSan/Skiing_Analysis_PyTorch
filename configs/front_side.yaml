@@ -15,7 +15,7 @@ paths:
   sam3d_body_path: ${paths.root_path}/sam3d_body_results
   sam3_path: ${paths.root_path}/front_sam3_results
 
-  log_path: logs/bundle_adjustment/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  log_path: logs/front_side/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 visualize:
   save_video: true

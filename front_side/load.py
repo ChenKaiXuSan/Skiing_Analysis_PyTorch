@@ -23,17 +23,15 @@ Date      	By	Comments
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
-from torchvision.io import read_video
 
 logger = logging.getLogger(__name__)
 
 
-def load_front_info(
+def load_sam3_results(
     pt_file_path: Path,
-    # video_file_path: Path,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     从 Detectron2 的 pt_info 中读取关键点与 bbox。
@@ -48,11 +46,8 @@ def load_front_info(
 
     if not os.path.exists(pt_file_path):
         raise FileNotFoundError(f"Missing file: {pt_file_path}")
-    logger.info(f"Loading: {pt_file_path}")
+    logger.info(f"Loading SAM3 results from: {pt_file_path}")
     data = dict(np.load(pt_file_path, allow_pickle=True).item())
-
-    # --------- frames / shape ----------
-    # frames = read_video(video_file_path, pts_unit="sec", output_format="THWC")[0]
 
     return data
 

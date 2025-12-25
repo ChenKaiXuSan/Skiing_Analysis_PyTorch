@@ -74,7 +74,7 @@ def _unnormalize_bbox(bbox: np.ndarray, img_size: Tuple[int, int]) -> np.ndarray
     return bbox_px
 
 
-def process_one_frame(
+def process_front_frame(
     image: np.ndarray, bbox_xywh: np.ndarray, output_dir: Path, frame_idx: int
 ):
     """处理单帧图像的主函数占位符
