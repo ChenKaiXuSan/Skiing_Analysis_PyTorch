@@ -93,6 +93,16 @@
       "python": "/opt/conda/bin/python",
       "console": "integratedTerminal",
       "args": []
-    }
+    },
+    {
+      "name": "front_side",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "front_side.main",
+      "cwd": "/workspace/code",
+      "python": "/opt/conda/envs/sam_3d_body/bin/python",
+      "console": "integratedTerminal",
+      "args": []
+    },
   ]
 }

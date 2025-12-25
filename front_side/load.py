@@ -31,16 +31,9 @@ from torchvision.io import read_video
 logger = logging.getLogger(__name__)
 
 
-def _load_npz(file_path: str) -> Dict[str, Any]:
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Missing file: {file_path}")
-    logger.info(f"Loading: {file_path}")
-    return dict(np.load(file_path, allow_pickle=True).item())
-
-
-def load_info(
+def load_front_info(
     pt_file_path: Path,
-    video_file_path: Path,
+    # video_file_path: Path,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     从 Detectron2 的 pt_info 中读取关键点与 bbox。
@@ -52,9 +45,33 @@ def load_info(
     - bbox_scores: (T, N)      若无则全 1
     - frames: (T, H, W, C) 的 torch.uint8，若 return_frames=False 则为 None
     """
-    data = _load_npz(pt_file_path)
+
+    if not os.path.exists(pt_file_path):
+        raise FileNotFoundError(f"Missing file: {pt_file_path}")
+    logger.info(f"Loading: {pt_file_path}")
+    data = dict(np.load(pt_file_path, allow_pickle=True).item())
 
     # --------- frames / shape ----------
-    frames = read_video(video_file_path, pts_unit="sec", output_format="THWC")[0]
+    # frames = read_video(video_file_path, pts_unit="sec", output_format="THWC")[0]
 
     return data
+
+
+def load_sam_3d_body_results(npz_path: str) -> Dict[str, np.ndarray]:
+    """
+    Load the SAM 3D Body model from the specified checkpoint.
+
+    Args:
+        checkpoint_path (str): Path to the model checkpoint file.
+    Returns:
+        SAM3DBodyModel: An instance of the loaded SAM3DBodyModel.
+    """
+    if not os.path.exists(npz_path):
+        raise FileNotFoundError(f"SAM 3D Body results file not found: {npz_path}")
+    logger.info(f"Loading SAM 3D Body results from: {npz_path}")
+    data = np.load(npz_path, allow_pickle=True)
+    results = {}
+    for idx, info in enumerate(data["outputs"]):
+        results[idx] = info
+
+    return results

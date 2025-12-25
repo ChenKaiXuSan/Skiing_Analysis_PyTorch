@@ -26,19 +26,7 @@ import numpy as np
 from tqdm import tqdm
 
 from .fuse.fuse import rigid_transform_3D
-from .load import (
-    load_info,
-    load_sam_3d_body_results,
-    load_vggt_results,
-    load_videopose3d_results,
-)
-from .loss import (
-    baseline_reg_loss,
-    bone_length_loss,
-    camera_smooth_loss,
-    pose_temporal_loss,
-    reprojection_loss,
-)
+
 from .metadata.mhr70 import pose_info as mhr70_pose_info
 from .reproject import reproject_and_visualize
 from .visualization.merge import merge_frame_to_video
@@ -72,141 +60,13 @@ def setup_visualizer():
     return skeleton_visualizer, scene_visualizer
 
 
-def process_one_person(
-    left_video_path: Path,
-    left_pt_path: Path,
-    left_sam3d_body_path: Path,
-    right_video_path: Path,
-    right_pt_path: Path,
-    right_sam3d_body_path: Path,
-    vggt_files: List[Path],
-    videopose3d_files: List[Path],
-    out_root: Path,
-) -> None:
-    """
-    Process one person with multi-view bundle adjustment.
-
-    Parameters
-    ----------
-    left_video_path : Path
-        Path to the left video file.
-    left_pt_path : Path
-        Path to the left 2D keypoints file.
-    right_video_path : Path
-        Path to the right video file.
-    right_pt_path : Path
-        Path to the right 2D keypoints file.
-    vggt_files : List[Path]
-        List of VGGT numpy files for all views.
-    videopose3d_files : List[Path]
-        List of VideoPose3D numpy files for all views.
-    out_root : Path
-        Output root directory.
-    cfg : DictConfig
-        Configuration dictionary.
-
-    Returns
-    -------
-    out_dir : Optional[Path]
-        Output directory if successful, None otherwise.
-    """
-
-    skeleton_visualizer, scene_visualizer = setup_visualizer()
-
-    # left_kpt, left_kpt_score, left_bboxes_xyxy, left_bboxes_scores, left_frame = (
-    #     load_info(
-    #         video_file_path=left_video_path.as_posix(),
-    #         pt_file_path=left_pt_path.as_posix(),
-    #         assume_normalized=False,
-    #     )
-    # )
-
-    # right_kpt, right_kpt_score, right_bboxes_xyxy, right_bboxes_scores, right_frame = (
-    #     load_info(
-    #         video_file_path=right_video_path.as_posix(),
-    #         pt_file_path=right_pt_path.as_posix(),
-    #         assume_normalized=False,
-    #     )
-    # )
-
-    left_sam3d_body_res = load_sam_3d_body_results(left_sam3d_body_path.as_posix())
-    right_sam3d_body_res = load_sam_3d_body_results(right_sam3d_body_path.as_posix())
-
-    # videopose3d_res = load_videopose3d_results(videopose3d_files)
-    # vggt_res = load_vggt_results(vggt_files)
-
-    for frame_idx in tqdm(range(len(left_sam3d_body_res)), desc="Processing frames"):
-        # if frame_idx > 60:
-        #     break
-
-        left_frame, right_frame, kpts_world, R_RL, t_RL = process_frame(
-            left_sam3d_body_res=left_sam3d_body_res,
-            right_sam3d_body_res=right_sam3d_body_res,
-            frame_idx=frame_idx,
-            skeleton_visualizer=skeleton_visualizer,
-            scene_visualizer=scene_visualizer,
-            out_root=out_root,
-        )
-
-        # 这里的R_RL, t_RL 是右相机到左相机的变换，所以需要用它来把右相机的位置变换到世界系
-        left_R = np.eye(3)
-        left_t = np.zeros(3)
-        right_R = R_RL.T
-        right_t = -R_RL.T @ t_RL
-
-        # TODO: 重投影误差
-        reproj_err = reproject_and_visualize(
-            img1=left_frame,
-            img2=right_frame,
-            X3=kpts_world,
-            kptL=left_sam3d_body_res[frame_idx]["pred_keypoints_2d"],
-            kptR=right_sam3d_body_res[frame_idx]["pred_keypoints_2d"],
-            K1=K,
-            K2=K,
-            dist1=None,
-            dist2=None,
-            R=[left_R, right_R],
-            T=[left_t, right_t],
-            out_path=out_root / "reprojection" / f"{frame_idx}.jpg",
-        )
-
-        # write reprojetion error to log
-        with open(out_root / "ba_reprojection_error.txt", "a") as f:
-            f.write(f"Frame {frame_idx:04d} Reprojection Error (in pixels):\n")
-            for k, v in reproj_err.items():
-                if isinstance(v, np.ndarray):
-                    continue
-                f.write(f"  {k}: {v}\n")
-
-    # merge frame to video if needed
-    merge_frame_to_video(
-        save_path=out_root,
-        flag="fused",
-    )
-
-    merge_frame_to_video(
-        save_path=out_root,
-        flag="scene",
-    )
-
-    merge_frame_to_video(
-        save_path=out_root,
-        flag="frame_scene",
-    )
-
-    # 清空内存
-    gc.collect()
-
-
 def process_frame(
     left_sam3d_body_res,
     right_sam3d_body_res,
     frame_idx,
-    skeleton_visualizer: SkeletonVisualizer,
-    scene_visualizer: SceneVisualizer,
     out_root: Path,
 ):
-    # 模拟 Ground Truth (Target B)
+    skeleton_visualizer, scene_visualizer = setup_visualizer()
 
     left_frame = left_sam3d_body_res[frame_idx]["frame"]
     right_frame = right_sam3d_body_res[frame_idx]["frame"]
