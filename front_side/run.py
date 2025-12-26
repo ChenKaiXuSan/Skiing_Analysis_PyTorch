@@ -251,7 +251,7 @@ def draw_bev_axes(
 
 def merge(
     kpts_world: np.ndarray,
-    foot_xy_px: dict,  # e.g. {"x": 320, "y": 240} or {"u":..., "v":...}
+    foot_xy_px: list[np.ndarray],
     raw_img: np.ndarray,
     bev_img: np.ndarray,
     frame_idx: int,
@@ -261,9 +261,10 @@ def merge(
     bev_vis_path.mkdir(parents=True, exist_ok=True)
 
     # 1) BEV中心像素（你说 foot_xy_px 就是中心）
-    # TODO: 这里需要判断哪个是化学运动员
-    u0 = int(round(foot_xy_px[2][0]))
-    v0 = int(round(foot_xy_px[2][1]))
+    # TODO: 这里需要判断哪个是滑雪运动员
+    # 总是使用最后一个bbox的信息
+    u0 = int(round(foot_xy_px[-1][0]))
+    v0 = int(round(foot_xy_px[-1][1]))
     center_px = (u0, v0)
 
     # 2) world中心：你要保证它和 foot_xy_px 对应的是同一个“中心定义”

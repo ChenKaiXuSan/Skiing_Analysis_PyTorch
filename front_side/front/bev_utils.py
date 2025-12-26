@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, List
 
 import cv2
 import numpy as np
@@ -123,7 +123,7 @@ def make_bev(
     src_bg=(25, 25, 25),
     bev_bg=(10, 10, 10),
     frame_idx: int = 0,
-) -> Tuple[Dict[int, np.ndarray], np.ndarray, np.ndarray]:
+) -> Tuple[List[np.ndarray], np.ndarray, np.ndarray]:
     if img is None:
         raise ValueError("img is None")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -191,7 +191,7 @@ def make_bev(
     dbg_all = src_base.copy()
     bev_all = bev_img.copy()
 
-    foot_xy_px_res: Dict[int, np.ndarray] = {}
+    foot_xy_px_res: list[np.ndarray] = []
 
     # ✅ 注意：这里不要再套两层 for 了（你原来的代码里重复 for 了）
     for pid, one_bbox in enumerate(bboxes_xyxy):
@@ -214,7 +214,7 @@ def make_bev(
 
         # map to BEV and draw
         foot_xy_px = image_points_to_bev(foot_uv[None, :], H_px)[0]
-        foot_xy_px_res[pid] = foot_xy_px
+        foot_xy_px_res.append(foot_xy_px)
         x, y = foot_xy_px
 
         cv2.circle(bev_all, (int(round(x)), int(round(y))), 6, color, -1)
