@@ -52,8 +52,8 @@ def process_one_person(
     front_sam3_res = load_sam3_results(front_sam3_results.as_posix())
 
     for frame_idx in tqdm(range(len(left_sam3d_body_res)), desc="Processing frames"):
-        if frame_idx > 60:
-            break
+        # if frame_idx > 30:
+        #     break
 
         # process side view
         left_frame, right_frame, kpts_world, R_RL, t_RL = process_side_frame(
@@ -115,13 +115,26 @@ COCO_EDGES = [
 
 
 def project_world_to_bev_centered(
-    kpts_world: np.ndarray,  # (J,3)
-    center_world: np.ndarray,  # (3,)
-    center_px: tuple[int, int],  # (u0, v0) on bev_img
-    meters_per_pixel: float,  # res: m/px
-    use_axes: tuple[int, int] = (0, 2),  # (x_idx, z_idx) from (x,y,z)
-    z_forward_up: bool = True,  # True: z larger -> go up (v smaller)
+    kpts_world: np.ndarray,
+    center_world: np.ndarray,
+    center_px: tuple[int, int],
+    meters_per_pixel: float,
+    use_axes: tuple[int, int] = (0, 2),
+    rot90_left: bool = False,  # True: rotate (x,z) left by 90° around center
 ):
+    """需要把kpt world的坐标和bev的坐标对起来
+
+    Args:
+        kpts_world (np.ndarray): _description_
+        center_world (np.ndarray): _description_
+        center_px (tuple[int, int]): _description_
+        meters_per_pixel (float): _description_
+        use_axes (tuple[int, int], optional): _description_. Defaults to (0, 2).
+        rot90_left (bool, optional): _description_. Defaults to False.
+
+    Returns:
+        _type_: _description_
+    """
     x_idx, z_idx = use_axes
     cx, cz = center_world[x_idx], center_world[z_idx]
     u0, v0 = center_px
@@ -135,8 +148,12 @@ def project_world_to_bev_centered(
         x, z = kpts_world[j, x_idx], kpts_world[j, z_idx]
         dx, dz = x - cx, z - cz
 
+        # ---- rotate in XZ plane (around center) ----
+        if rot90_left:
+            dx, dz = dz, dx
+
         du = dx / meters_per_pixel
-        dv = (-dz / meters_per_pixel) if z_forward_up else (dz / meters_per_pixel)
+        dv = -dz / meters_per_pixel
 
         u = int(round(u0 + du))
         v = int(round(v0 + dv))
@@ -166,6 +183,72 @@ def draw_skeleton(bev_img: np.ndarray, pts_uv, edges=COCO_EDGES):
     return bev_img
 
 
+def draw_bev_axes(
+    img: np.ndarray,
+    origin_px: tuple[int, int],
+    meters_per_pixel: float,
+    axis_len_m: float = 1.0,  # 轴长度（米）
+    color_x=(0, 0, 255),  # X轴：红
+    color_z=(0, 255, 0),  # Z轴：绿
+    thickness: int = 2,
+):
+    """
+    在 BEV 图上画局部坐标轴：
+      +X → 右
+      +Z → 下
+    """
+    # TODO: 这里需要修改一下
+
+    u0, v0 = origin_px
+    axis_len_px = int(round(axis_len_m / meters_per_pixel))
+
+    # +X 轴（右）
+    end_x = (u0 + axis_len_px, v0)
+    cv2.arrowedLine(
+        img,
+        (u0, v0),
+        end_x,
+        color=color_x,
+        thickness=thickness,
+        tipLength=0.2,
+        line_type=cv2.LINE_AA,
+    )
+    cv2.putText(
+        img,
+        "+X",
+        (end_x[0] + 5, end_x[1] - 5),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        color_x,
+        2,
+        cv2.LINE_AA,
+    )
+
+    # +Z 轴（下）
+    end_z = (u0, v0 + axis_len_px)
+    cv2.arrowedLine(
+        img,
+        (u0, v0),
+        end_z,
+        color=color_z,
+        thickness=thickness,
+        tipLength=0.2,
+        line_type=cv2.LINE_AA,
+    )
+    cv2.putText(
+        img,
+        "+Z",
+        (end_z[0] + 5, end_z[1] + 20),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        color_z,
+        2,
+        cv2.LINE_AA,
+    )
+
+    return img
+
+
 def merge(
     kpts_world: np.ndarray,
     foot_xy_px: dict,  # e.g. {"x": 320, "y": 240} or {"u":..., "v":...}
@@ -174,7 +257,8 @@ def merge(
     frame_idx: int,
     output_dir: Path,
 ) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
+    bev_vis_path = output_dir / f"bev_vis"
+    bev_vis_path.mkdir(parents=True, exist_ok=True)
 
     # 1) BEV中心像素（你说 foot_xy_px 就是中心）
     # TODO: 这里需要判断哪个是化学运动员
@@ -192,18 +276,29 @@ def merge(
     bev_vis = bev_img.copy()
 
     pts_uv = project_world_to_bev_centered(
-        kpts_world=kpts_world,
-        center_world=center_world,
-        center_px=center_px,
-        meters_per_pixel=meters_per_pixel,
-        use_axes=(0, 2),  # 用 (X,Z) 当地面平面
-        z_forward_up=True,
+        kpts_world,
+        center_world,
+        center_px,
+        meters_per_pixel,
+        rot90_left=True,
     )
 
-    # 可视化中心点
+    # 1️⃣ 画坐标轴（先画，保证在底层）
+    bev_vis = draw_bev_axes(
+        bev_vis,
+        origin_px=center_px,
+        meters_per_pixel=meters_per_pixel,
+        axis_len_m=1.0,  # 1 米坐标轴
+    )
+
+    # TODO:把运动员的运动方向画到图片上面去
+
+    # 2️⃣ 再画中心点
     cv2.circle(bev_vis, center_px, 5, (255, 0, 0), -1, cv2.LINE_AA)
 
+    # 3️⃣ 再画骨架
     bev_vis = draw_skeleton(bev_vis, pts_uv)
 
-    out_path = output_dir / f"bev_{frame_idx:06d}.png"
+    # 保存结果
+    out_path = bev_vis_path / f"{frame_idx:06d}.png"
     cv2.imwrite(str(out_path), bev_vis)
