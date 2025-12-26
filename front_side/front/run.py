@@ -87,8 +87,14 @@ def process_front_frame(
 
     # reshap img
     img = cv2.resize(img, (W, H))  # (W, H)
+
     foot_xy_px, raw_img, bev_img = make_bev(
-        img=img, bboxes_xyxy=bbox_xyxy, out_dir=output_dir / f"frame{frame_idx}"
+        img=img,
+        bboxes_xyxy=bbox_xyxy,
+        out_dir=output_dir,
+        blank_src=False,  # ✅ 原图换空白
+        blank_bev=True,  # ✅ BEV 也换空白（只画点）
+        frame_idx=frame_idx,
     )
 
     return foot_xy_px, raw_img, bev_img
