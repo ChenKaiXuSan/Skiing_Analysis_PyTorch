@@ -25,7 +25,6 @@ import os
 from pathlib import Path
 
 import cv2
-import matplotlib.pyplot as plt
 import torch
 from omegaconf.omegaconf import DictConfig
 from tqdm import tqdm

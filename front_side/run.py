@@ -33,6 +33,7 @@ from tqdm import tqdm
 from .front.run import process_front_frame
 from .load import load_sam3_results, load_sam_3d_body_results
 from .side.run import process_side_frame
+from .utils.merge import merge_frame_to_video
 
 
 def process_one_person(
@@ -54,6 +55,7 @@ def process_one_person(
         # if frame_idx > 60:
         #     break
 
+        # process side view
         left_frame, right_frame, kpts_world, R_RL, t_RL = process_side_frame(
             left_sam3d_body_res=left_sam3d_body_res,
             right_sam3d_body_res=right_sam3d_body_res,
@@ -72,7 +74,7 @@ def process_one_person(
             image, bbox_xyxy, output_dir=output_dir / "front", frame_idx=frame_idx
         )
 
-        # merge side and front results here
+        # merge side and front results
         merge(
             kpts_world=kpts_world,
             foot_xy_px=foot_xy_px,
@@ -81,8 +83,16 @@ def process_one_person(
             output_dir=output_dir / "merge",
             frame_idx=frame_idx,
         )
+
+    # merge side video
+    merge_frame_to_video(save_path=output_dir / "side", flag="skeleton_3d", fps=30)
+    # merge front video
+    merge_frame_to_video(save_path=output_dir / "front", flag="bev_vis", fps=30)
+    # merge merge video
+    merge_frame_to_video(save_path=output_dir / "merge", flag="bev_vis", fps=30)
     # 清空内存
     gc.collect()
+    # renderer.close()
 
 
 COCO_EDGES = [

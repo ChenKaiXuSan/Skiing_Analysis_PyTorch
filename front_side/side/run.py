@@ -26,7 +26,6 @@ from .fuse.fuse import rigid_transform_3D
 
 from .metadata.mhr70 import pose_info as mhr70_pose_info
 from .reproject import reproject_and_visualize
-from .visualization.merge import merge_frame_to_video
 from .visualization.scene_visualizer import SceneVisualizer
 from .visualization.skeleton_visualizer import SkeletonVisualizer
 
