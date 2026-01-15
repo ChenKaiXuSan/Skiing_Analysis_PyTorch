@@ -35,6 +35,8 @@ from .load import load_sam3_results, load_sam_3d_body_results
 from .side.run import process_side_frame
 from .utils.merge import merge_frame_to_video
 
+from .side.visualization.utils import parse_pose_metainfo
+
 
 def process_one_person(
     left_sam3d_body_path: Path,
@@ -98,19 +100,53 @@ def process_one_person(
     gc.collect()
 
 
-COCO_EDGES = [
-    (5, 7),
-    (7, 9),
-    (6, 8),
-    (8, 10),
+BEV_EDGES = [
+    # left leg
+    (13, 11),  # left_ankle  - left_knee
+    (11, 9),  # left_knee   - left_hip
+    # right leg
+    (14, 12),  # right_ankle - right_knee
+    (12, 10),  # right_knee  - right_hip
+    # pelvis
+    (9, 10),  # left_hip   - right_hip
+]
+
+BEV_FOOT_EDGES = [
+    # left foot
+    (17, 15),  # left_heel        - left_big_toe
+    (17, 16),  # left_heel        - left_small_toe
+    # right foot
+    (20, 18),  # right_heel       - right_big_toe
+    (20, 19),  # right_heel       - right_small_toe
+]
+
+
+BEV_FOOT_ATTACH_EDGES = [
+    (13, 17),  # left_ankle  - left_heel
+    (13, 15),  # left_ankle  - left_big_toe
+    (13, 16),  # left_ankle  - left_small_toe
+    (14, 20),  # right_ankle - right_heel
+    (14, 18),  # right_ankle - right_big_toe
+    (14, 19),  # right_ankle - right_small_toe
+]
+
+BEV_TORSO_EDGES = [
+    (5, 6),  # left_shoulder - right_shoulder
+    (5, 9),  # left_shoulder - left_hip
+    (6, 10),  # right_shoulder - right_hip
+]
+
+BEV_EDGES_MINIMAL = [
+    (13, 11),
+    (11, 9),
+    (14, 12),
+    (12, 10),
+    (9, 10),
+    (17, 15),
+    (17, 16),
+    (20, 18),
+    (20, 19),
     (5, 6),
-    (5, 11),
-    (6, 12),
-    (11, 13),
-    (13, 15),
-    (12, 14),
-    (14, 16),
-    (11, 12),
 ]
 
 
@@ -161,7 +197,7 @@ def project_world_to_bev_centered(
     return pts_uv
 
 
-def draw_skeleton(bev_img: np.ndarray, pts_uv, edges=COCO_EDGES):
+def draw_skeleton(bev_img: np.ndarray, pts_uv, edges=BEV_EDGES_MINIMAL) -> np.ndarray:
     h, w = bev_img.shape[:2]
 
     # lines
@@ -181,72 +217,6 @@ def draw_skeleton(bev_img: np.ndarray, pts_uv, edges=COCO_EDGES):
             cv2.circle(bev_img, p, 3, (0, 0, 255), -1, cv2.LINE_AA)
 
     return bev_img
-
-
-def draw_bev_axes(
-    img: np.ndarray,
-    origin_px: tuple[int, int],
-    meters_per_pixel: float,
-    axis_len_m: float = 1.0,  # 轴长度（米）
-    color_x=(0, 0, 255),  # X轴：红
-    color_z=(0, 255, 0),  # Z轴：绿
-    thickness: int = 2,
-):
-    """
-    在 BEV 图上画局部坐标轴：
-      +X → 右
-      +Z → 下
-    """
-    # TODO: 这里需要修改一下
-
-    u0, v0 = origin_px
-    axis_len_px = int(round(axis_len_m / meters_per_pixel))
-
-    # +X 轴（右）
-    end_x = (u0 + axis_len_px, v0)
-    cv2.arrowedLine(
-        img,
-        (u0, v0),
-        end_x,
-        color=color_x,
-        thickness=thickness,
-        tipLength=0.2,
-        line_type=cv2.LINE_AA,
-    )
-    cv2.putText(
-        img,
-        "+X",
-        (end_x[0] + 5, end_x[1] - 5),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        color_x,
-        2,
-        cv2.LINE_AA,
-    )
-
-    # +Z 轴（下）
-    end_z = (u0, v0 + axis_len_px)
-    cv2.arrowedLine(
-        img,
-        (u0, v0),
-        end_z,
-        color=color_z,
-        thickness=thickness,
-        tipLength=0.2,
-        line_type=cv2.LINE_AA,
-    )
-    cv2.putText(
-        img,
-        "+Z",
-        (end_z[0] + 5, end_z[1] + 20),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        color_z,
-        2,
-        cv2.LINE_AA,
-    )
-
-    return img
 
 
 def merge(
@@ -282,14 +252,6 @@ def merge(
         center_px,
         meters_per_pixel,
         rot90_left=True,
-    )
-
-    # 1️⃣ 画坐标轴（先画，保证在底层）
-    bev_vis = draw_bev_axes(
-        bev_vis,
-        origin_px=center_px,
-        meters_per_pixel=meters_per_pixel,
-        axis_len_m=1.0,  # 1 米坐标轴
     )
 
     # TODO:把运动员的运动方向画到图片上面去
