@@ -147,6 +147,7 @@ def process_one_video(
     out_dir.mkdir(parents=True, exist_ok=True)
     inference_output_path.mkdir(parents=True, exist_ok=True)
 
+    # 读取 pt 信息
     _, _, bbox_xyxy, bbox_scores, frames = load_info(
         pt_file_path=pt_path, video_file_path=video_path
     )
@@ -160,10 +161,17 @@ def process_one_video(
     for idx in tqdm(range(0, frames.shape[0]), desc="Processing frames"):
         # if idx > 1:
         #     break
-        outputs = estimator.process_one_image(
-            img=frames[idx],
-            bboxes=bbox_xyxy[idx],
-        )
+
+        if bbox_xyxy is not None:
+            outputs = estimator.process_one_image(
+                img=frames[idx],
+                bboxes=bbox_xyxy[idx],
+            )
+        else:
+            outputs = estimator.process_one_image(
+                img=frames[idx],
+                bboxes=None,
+            )
 
         # 2D 结果可视化
         vis_results = visualize_2d_results(frames[idx], outputs, visualizer)

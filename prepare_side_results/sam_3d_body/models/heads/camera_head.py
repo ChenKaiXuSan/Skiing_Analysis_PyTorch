@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from sam3d_body.sam_3d_body.models.modules.geometry_utils import perspective_projection
+from prepare_side_results.sam_3d_body.models.modules.geometry_utils import perspective_projection
 
 from ..modules import get_intrinsic_matrix, to_2tuple
 from ..modules.transformer import FFN

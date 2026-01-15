@@ -36,25 +36,23 @@ def find_files(
 @hydra.main(config_path="../configs", config_name="sam3d_body", version_base=None)
 def main(cfg: DictConfig) -> None:
     # logging 设置
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    logger.setLevel(logging.INFO)
-
     logger.info("==== Config ====\n" + OmegaConf.to_yaml(cfg))
 
     # 读取路径
-    video_root = Path(cfg.paths.video_path).resolve()
-    pt_root = Path(cfg.paths.pt_path).resolve()
-    out_root = Path(cfg.paths.log_path).resolve()
-    inference_output_path = Path(cfg.paths.result_output_path).resolve()
-
-    if not video_root.exists():
-        raise FileNotFoundError(f"video_path not found: {video_root}")
-    if not pt_root.exists():
-        raise FileNotFoundError(f"pt_path not found: {pt_root}")
+    if cfg.infer.type == "video":
+        video_root = Path(cfg.paths.video_path).resolve()
+        pt_root = Path(cfg.paths.pt_path).resolve()
+        out_root = Path(cfg.paths.log_path).resolve()
+        inference_output_path = Path(cfg.paths.result_output_path).resolve()
+        if not video_root.exists():
+            raise FileNotFoundError(f"video_path not found: {video_root}")
+        if not pt_root.exists():
+            raise FileNotFoundError(f"pt_path not found: {pt_root}")
+    elif cfg.infer.type == "unity":
+        video_root = Path(cfg.paths.unity.video_path).resolve()
+        pt_root = None
+        out_root = Path(cfg.paths.log_path).resolve()
+        inference_output_path = Path(cfg.paths.result_output_path).resolve()
 
     out_root.mkdir(parents=True, exist_ok=True)
     inference_output_path.mkdir(parents=True, exist_ok=True)
@@ -87,18 +85,20 @@ def main(cfg: DictConfig) -> None:
     # ---------------------------------------------------------------------- #
     # 扫描 pt_root
     # ---------------------------------------------------------------------- #
+    if pt_root is not None:
+        subjects_pt = sorted([p for p in pt_root.iterdir() if p.is_dir()])
+        if not subjects_pt:
+            raise FileNotFoundError(f"No subject folders under: {pt_root}")
+        logger.info(f"Found {len(subjects_pt)} subjects in: {pt_root}")
 
-    subjects_pt = sorted([p for p in pt_root.iterdir() if p.is_dir()])
-    if not subjects_pt:
-        raise FileNotFoundError(f"No subject folders under: {pt_root}")
-    logger.info(f"Found {len(subjects_pt)} subjects in: {pt_root}")
-
-    subjects_pt = [p.name for p in subjects_pt]
-    for subject_name in subjects_pt:
-        pt_files = find_files(pt_root / subject_name, pt_patterns, recursive)
-        if not pt_files:
-            logger.warning(f"[No pt] {subject_name} in {pt_root / subject_name}")
-
+        subjects_pt = [p.name for p in subjects_pt]
+        for subject_name in subjects_pt:
+            pt_files = find_files(pt_root / subject_name, pt_patterns, recursive)
+            if not pt_files:
+                logger.warning(f"[No pt] {subject_name} in {pt_root / subject_name}")
+    else:
+        subjects_pt = ["male"]
+    
     # ---------------------------------------------------------------------- #
     # 构建 multi-view 任务（只保留多视角）
     # ---------------------------------------------------------------------- #
@@ -112,15 +112,25 @@ def main(cfg: DictConfig) -> None:
 
     for subject_name in subjects:
         vids = videos_map[subject_name]
-        pts = sorted(
-            [p for p in (pt_root / subject_name).iterdir() if p.suffix == ".pt"]
-        )
+        if pt_root is not None:
+            pts = sorted(
+                [p for p in (pt_root / subject_name).iterdir() if p.suffix == ".pt"]
+            )
+        else:
+            pts = []
 
-        for vid, pt in zip(vids, pts):
-            if vid.stem == "osmo_1":
-                _pairs.append(("right", subject_name, vid, pt))
-            elif vid.stem == "osmo_2":
-                _pairs.append(("left", subject_name, vid, pt))
+        if len(pts) != 0:
+            for vid, pt in zip(vids, pts):
+                if vid.stem == "osmo_1":
+                    _pairs.append(("right", subject_name, vid, pt))
+                elif vid.stem == "osmo_2":
+                    _pairs.append(("left", subject_name, vid, pt))
+        else:
+            for vid in vids:
+                if "left" in vid.stem:
+                    _pairs.append(("left", subject_name, vid, None))
+                elif "right" in vid.stem:
+                    _pairs.append(("right", subject_name, vid, None))
 
     logger.info(f"Total matched subjects: {len(subjects)}")
 
