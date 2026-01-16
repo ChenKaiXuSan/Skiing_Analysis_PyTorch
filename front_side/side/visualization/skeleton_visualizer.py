@@ -81,12 +81,12 @@ class SkeletonVisualizer:
 
             if self.kpt_color is None or isinstance(self.kpt_color, str):
                 kpt_color = [self.kpt_color] * len(kpts)
-            elif len(self.kpt_color) == len(kpts):
+            elif len(self.kpt_color) <= len(kpts):
                 kpt_color = self.kpt_color
             else:
                 raise ValueError(
                     f"the length of kpt_color "
-                    f"({len(self.kpt_color)}) does not matches "
+                    f"({len(self.kpt_color)}) is larger than "
                     f"that of keypoints ({len(kpts)})"
                 )
 
@@ -94,15 +94,15 @@ class SkeletonVisualizer:
             if self.skeleton is not None and self.link_color is not None:
                 if self.link_color is None or isinstance(self.link_color, str):
                     link_color = [self.link_color] * len(self.skeleton)
-                elif len(self.link_color) == len(self.skeleton):
+                elif len(self.link_color) <= len(self.skeleton):
                     link_color = self.link_color
                 else:
                     raise ValueError(
                         f"the length of link_color "
-                        f"({len(self.link_color)}) does not matches "
-                        f"that of skeleton ({len(self.skeleton)})"
+                        f"({len(self.link_color)}) is larger than "
+                        f"that of skeleton links ({len(self.skeleton)})"
                     )
-
+                
                 for sk_id, sk in enumerate(self.skeleton):
                     pos1 = (int(kpts[sk[0], 0]), int(kpts[sk[0], 1]))
                     pos2 = (int(kpts[sk[1], 0]), int(kpts[sk[1], 1]))
@@ -139,15 +139,16 @@ class SkeletonVisualizer:
                         thickness=self.line_width,
                     )
 
-            # draw each point on image
-            for kid, kpt in enumerate(kpts):
-                if score[kid] < kpt_thr or kpt_color[kid] is None:
-                    # skip the point that should not be drawn
-                    continue
+            # 根据keypoint_info里面的key来绘制关键点
+            for kid, kpt_info in kpt_color.items():
+                color = kpt_info["color"]
+                name = kpt_info["name"]
 
-                color = kpt_color[kid]
+                kpt = cur_keypoints[kid, :-1]
+
                 if not isinstance(color, str):
                     color = tuple(int(c) for c in color)
+
                 transparency = self.alpha
                 if self.show_keypoint_weight:
                     transparency *= max(0, min(1, score[kid]))
