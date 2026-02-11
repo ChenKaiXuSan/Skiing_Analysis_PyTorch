@@ -38,6 +38,9 @@ infer:
   keep_frames: true
   num_inference_steps: 4
   gpu: 0
+  # Multi-GPU Multi-Threading Settings
+  num_gpus: null  # null = use all available GPUs, or specify number
+  num_workers: null  # null = use num_gpus, or specify number of worker threads
 
 dataset:
   recursive: false
