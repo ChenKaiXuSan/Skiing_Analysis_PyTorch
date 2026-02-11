@@ -46,11 +46,17 @@ from .vis import (
 logger = logging.getLogger(__name__)
 
 
-def select_closest_person(outputs):
-    """Select the closest person using camera depth, fallback to bbox area."""
+def select_closest_person(outputs, previous_person=None):
+    """Select the closest person using camera depth, orientation, and frame continuity.
+    
+    Args:
+        outputs: List of detected persons
+        previous_person: Person info from previous frame (for continuity check)
+    """
     if not outputs:
         return outputs
 
+    # Strategy 1: Use camera depth to find closest person
     cam_candidates = []
     for i, out in enumerate(outputs):
         cam_t = out.get("pred_cam_t")
@@ -61,9 +67,86 @@ def select_closest_person(outputs):
             cam_candidates.append((float(cam_t[2]), i))
 
     if cam_candidates:
-        _, best_idx = min(cam_candidates, key=lambda x: x[0])
-        return [outputs[best_idx]]
+        # Get closest person by camera depth
+        cam_candidates.sort(key=lambda x: x[0])
+        closest_depth, closest_idx = cam_candidates[0]
+        closest_out = outputs[closest_idx]
+        
+        # If we have a previous frame, try to find continuous person
+        if previous_person is not None:
+            prev_cam_t = previous_person.get("pred_cam_t")
+            prev_rot = previous_person.get("pred_global_rots")
+            
+            if prev_cam_t is not None and prev_rot is not None:
+                prev_cam_t = np.asarray(prev_cam_t).reshape(-1)
+                prev_rot = np.asarray(prev_rot)
+                
+                # Handle different rotation matrix shapes
+                # If shape is (J, 3, 3), take the root (first) joint
+                # If shape is (3, 3), use directly
+                if prev_rot.ndim == 3 and prev_rot.shape[0] > 1:
+                    prev_rot = prev_rot[0]  # Take root joint rotation
+                elif prev_rot.ndim > 2:
+                    prev_rot = prev_rot.reshape(3, 3)
+                
+                if prev_rot.shape != (3, 3):
+                    # Skip continuity check if rotation shape is invalid
+                    return [outputs[closest_idx]]
+                
+                prev_forward = prev_rot[:, 2]
+                
+                # Check all candidates for continuity
+                best_continuity_idx = -1
+                best_continuity_score = -1.0
+                
+                for depth, idx in cam_candidates:
+                    curr_out = outputs[idx]
+                    curr_rot = curr_out.get("pred_global_rots")
+                    
+                    if curr_rot is None:
+                        continue
+                    
+                    curr_rot = np.asarray(curr_rot)
+                    
+                    # Handle different rotation matrix shapes
+                    if curr_rot.ndim == 3 and curr_rot.shape[0] > 1:
+                        curr_rot = curr_rot[0]  # Take root joint rotation
+                    elif curr_rot.ndim > 2:
+                        try:
+                            curr_rot = curr_rot.reshape(3, 3)
+                        except ValueError:
+                            continue  # Skip if reshape fails
+                    
+                    if curr_rot.shape != (3, 3):
+                        continue
+                    
+                    curr_forward = curr_rot[:, 2]
+                    
+                    # Compute continuity score: 
+                    # - Camera depth change (prefer small change)
+                    # - Orientation similarity (prefer high similarity)
+                    depth_ratio = depth / (float(prev_cam_t[2]) + 1e-6)
+                    depth_change = abs(depth_ratio - 1.0)  # 0-1, lower is better
+                    
+                    orientation_sim = np.dot(prev_forward, curr_forward)  # -1-1, higher is better
+                    
+                    # Combined score (weighted average)
+                    # If depth changes < 20%, it's very likely the same person
+                    # If orientation changes < 30 degrees (sim > 0.866), it's continuous
+                    continuity_score = (1.0 - min(depth_change, 1.0) * 0.5) * 0.5 + orientation_sim * 0.5
+                    
+                    if continuity_score > best_continuity_score:
+                        best_continuity_score = continuity_score
+                        best_continuity_idx = idx
+                
+                # If we found a good match (score > 0.6), use it
+                if best_continuity_score > 0.6:
+                    return [outputs[best_continuity_idx]]
+        
+        # Otherwise, just return the closest person
+        return [outputs[closest_idx]]
 
+    # Strategy 2: Fallback to bbox area if no camera depth available
     bbox_candidates = []
     for i, out in enumerate(outputs):
         bbox = out.get("bbox")
@@ -182,6 +265,12 @@ def process_one_video(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     inference_output_path.mkdir(parents=True, exist_ok=True)
+    
+    # 统一保存路径
+    vis_dir = out_dir / "visualizations"  # 2D/3D可视化
+    mesh_dir = out_dir / "meshes"  # 网格结果
+    vis_dir.mkdir(parents=True, exist_ok=True)
+    mesh_dir.mkdir(parents=True, exist_ok=True)
 
     # 读取 pt 信息
     _, _, bbox_xyxy, bbox_scores, frames = load_info(
@@ -193,6 +282,7 @@ def process_one_video(
     visualizer = setup_visualizer()
 
     all_outputs = []
+    previous_person = None  # Track previous frame's selected person
 
     for idx in tqdm(range(0, frames.shape[0]), desc="Processing frames"):
         # if idx > 1:
@@ -209,60 +299,55 @@ def process_one_video(
                 bboxes=None,
             )
         
-        # 选取离摄像头最近的人作为运动员
-        outputs = select_closest_person(outputs)
+        # 选取离摄像头最近的人作为运动员，同时考虑与上一帧的连续性
+        outputs = select_closest_person(outputs, previous_person)
+        
+        frame_name = f"frame_{idx:04d}"
         
         # 2D 结果可视化
         vis_results = visualize_2d_results(frames[idx], outputs, visualizer)
-        cv2.imwrite(out_dir / f"frame_{idx:04d}_2d_visualization.png", vis_results[0])
+        cv2.imwrite(str(vis_dir / f"{frame_name}_2d.png"), vis_results[0])
 
         # 3D 网格可视化
         mesh_results = visualize_3d_mesh(frames[idx], outputs, estimator.faces)
-
-        # Display results
         for i, combined_img in enumerate(mesh_results):
-            combined_rgb = cv2.cvtColor(combined_img, cv2.COLOR_BGR2RGB)
-
             cv2.imwrite(
-                out_dir / f"frame_{idx:04d}_3d_mesh_visualization_{i}.png", combined_img
+                str(vis_dir / f"{frame_name}_3d_mesh_{i}.png"), 
+                combined_img
             )
 
-        #
-        visualize_sample_together(
-            img_cv2=frames[idx],
-            outputs=outputs,
-            faces=estimator.faces,
-        )
-
-        visualize_sample(
-            img_cv2=frames[idx],
-            outputs=outputs,
-            faces=estimator.faces,
-        )
-
-        # save mesh results to files
+        # 保存网格结果到文件
         save_mesh_results(
             img_cv2=frames[idx],
             outputs=outputs,
             faces=estimator.faces,
-            save_dir=str(out_dir / f"frame_{idx:04d}_meshes"),
-            image_name=f"frame_{idx:04d}",
+            save_dir=str(mesh_dir / frame_name),
+            image_name=frame_name,
         )
 
-        outputs = outputs[0]
-        outputs["frame"] = frames[idx]
 
-        all_outputs.append(outputs)
+        # 处理输出并保存
+        selected_output = outputs[0]
+        selected_output["frame"] = frames[idx]
+        
+        # 保存用于下一帧比较
+        previous_person = selected_output
+        all_outputs.append(selected_output)
 
-    # save other results
+    # 保存最终结果
     save_results(
         outputs=all_outputs,
         save_dir=inference_output_path,
     )
 
-    # final
+    # 清理资源
     torch.cuda.empty_cache()
     del estimator
     del visualizer
+
+    logger.info(f"✓ Video processing completed")
+    logger.info(f"  Visualizations: {vis_dir}")
+    logger.info(f"  Mesh results: {mesh_dir}")
+    logger.info(f"  Inference outputs: {inference_output_path}")
 
     return out_dir
