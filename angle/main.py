@@ -60,8 +60,6 @@ ANGLE_DEFS = {
     "hip_r": (69, 10, 12),
 }
 
-UP_AXIS = np.array([0.0, 1.0, 0.0], dtype=np.float64)
-
 
 def _center_from_ids(
     frame: np.ndarray,
@@ -88,8 +86,15 @@ def _unit(v: np.ndarray) -> np.ndarray:
 def compute_tilt_angles(
     kpts: np.ndarray,
     id_to_index: Dict[int, int],
+    up_axis: np.ndarray,
 ) -> Dict[str, np.ndarray]:
-    """Compute signed upper/lower body tilt angles (forward +, backward -)."""
+    """Compute signed upper/lower body tilt angles (forward +, backward -).
+
+    Args:
+        kpts: (T,J,3) keypoints array
+        id_to_index: joint ID to index mapping
+        up_axis: vertical axis direction (e.g., [0,1,0] for Y-up, [0,0,1] for Z-up)
+    """
     if kpts.ndim != 3 or kpts.shape[2] != 3:
         raise ValueError("kpts must be (T,J,3)")
 
@@ -119,11 +124,17 @@ def compute_tilt_angles(
             continue
 
         lr_unit = _unit(lr)
-        up_unit = _unit(UP_AXIS)
+        up_unit = _unit(up_axis)
         if not np.all(np.isfinite(lr_unit)) or not np.all(np.isfinite(up_unit)):
             continue
 
-        forward = _unit(np.cross(lr_unit, up_unit))
+        # Compute forward direction based on up_axis direction
+        # If up_axis points down (Y < 0), reverse cross product order
+        if up_axis[1] < 0:  # Y-axis down
+            forward = _unit(np.cross(up_unit, lr_unit))
+        else:  # Y-axis up
+            forward = _unit(np.cross(lr_unit, up_unit))
+        
         if not np.all(np.isfinite(forward)):
             continue
 
@@ -234,7 +245,6 @@ def main():
     output_dir = Path("/workspace/data/angle_outputs")
 
     for person in input_path.iterdir():
-
         person_name = person.stem
         print(f"Processing person: {person_name}")
 
@@ -247,22 +257,37 @@ def main():
 def process_person(input_path: Path, output_dir: Path) -> None:
     kpts = np.load(input_path)
     joint_angles = compute_angles(kpts, ANGLE_DEFS, ID_TO_INDEX)
-    body_angles = compute_tilt_angles(kpts, ID_TO_INDEX)
 
+    # Compute body tilt angles for both Y-axis directions
+    up_axis_y_up = np.array([0.0, 1.0, 0.0], dtype=np.float64)  # Y-axis up
+    up_axis_y_down = np.array([0.0, -1.0, 0.0], dtype=np.float64)  # Y-axis down
+    
+    body_angles_y_up = compute_tilt_angles(kpts, ID_TO_INDEX, up_axis_y_up)
+    body_angles_y_down = compute_tilt_angles(kpts, ID_TO_INDEX, up_axis_y_down)
+
+    # Save joint angles
     joint_csv = output_dir / "angles_joint.csv"
     joint_png = output_dir / "angles_joint.png"
-    body_csv = output_dir / "angles_body.csv"
-    body_png = output_dir / "angles_body.png"
-
     save_angles_csv(joint_csv, joint_angles)
     plot_angles(joint_png, joint_angles)
-    save_angles_csv(body_csv, body_angles)
-    plot_angles(body_png, body_angles)
-
     print(f"Joint angles saved to: {joint_csv}")
     print(f"Joint plot saved to: {joint_png}")
-    print(f"Body angles saved to: {body_csv}")
-    print(f"Body plot saved to: {body_png}")
+
+    # Save body angles (Y-axis up)
+    # body_csv_y_up = output_dir / "angles_body_y_up.csv"
+    # body_png_y_up = output_dir / "angles_body_y_up.png"
+    # save_angles_csv(body_csv_y_up, body_angles_y_up)
+    # plot_angles(body_png_y_up, body_angles_y_up)
+    # print(f"Body angles (Y-up) saved to: {body_csv_y_up}")
+    # print(f"Body plot (Y-up) saved to: {body_png_y_up}")
+
+    # Save body angles (Y-axis down)
+    body_csv_y_down = output_dir / "angles_body_y_down.csv"
+    body_png_y_down = output_dir / "angles_body_y_down.png"
+    save_angles_csv(body_csv_y_down, body_angles_y_down)
+    plot_angles(body_png_y_down, body_angles_y_down)
+    print(f"Body angles (Y-down) saved to: {body_csv_y_down}")
+    print(f"Body plot (Y-down) saved to: {body_png_y_down}")
 
 
 if __name__ == "__main__":

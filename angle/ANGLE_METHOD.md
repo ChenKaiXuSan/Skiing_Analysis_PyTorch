@@ -1,31 +1,31 @@
-# Angle Computation Method
+# 角度计算方法说明
 
-This document describes how joint angles are computed in `main.py` for the skiing athlete.
+本文档描述了 `main.py` 中滑雪运动员角度计算的实现方法。
 
-## Input
+## 输入
 
-- The input file is a NumPy array saved as `.npy` with shape `(T, J, 3)`.
-- `T` is the number of frames.
-- `J` is the number of joints, ordered by `TARGET_IDS`.
-- Each joint is a 3D point `(x, y, z)` in the same coordinate system as the keypoints.
+- 输入文件为 `.npy` 格式的 NumPy 数组，形状为 $(T, J, 3)$。
+- $T$ 为帧数。
+- $J$ 为关节数，顺序由 `TARGET_IDS` 定义。
+- 每个关节为 3D 点 $(x, y, z)$，坐标系与关键点一致。
 
-## Joint Indexing
+## 关节索引
 
-The mapping `TARGET_IDS` is built from `UNITY_MHR70_MAPPING` and defines the index order in the array.
-`ID_TO_INDEX` maps each joint ID to its array index.
+`TARGET_IDS` 由 `UNITY_MHR70_MAPPING` 构建，定义了数组中的关节顺序。
+`ID_TO_INDEX` 用于将关节 ID 映射到数组索引。
 
-Example entries:
+示例条目：
 
 - `9`: Thigh_L
 - `11`: calf_l
 - `13`: Foot_L
 - `69`: neck_01
 
-## Angle Definition
+## 关节角定义
 
-Each angle is defined by three joint IDs `(A, B, C)` and is the angle at joint `B` formed by the segments `BA` and `BC`.
+每个角度由三个关节 ID `(A, B, C)` 定义，计算的是在关节 `B` 处由线段 `BA` 与 `BC` 形成的夹角。
 
-The default definitions are:
+默认定义：
 
 - `knee_l`: `(9, 11, 13)`
 - `knee_r`: `(10, 12, 14)`
@@ -36,34 +36,110 @@ The default definitions are:
 - `hip_l`: `(69, 9, 11)`
 - `hip_r`: `(69, 10, 12)`
 
-You can change these tuples in `ANGLE_DEFS` to compute different joint angles.
+可以修改 `ANGLE_DEFS` 来计算其他关节角。
 
-## Angle Formula
+## 身体前倾/后仰角
 
-For a single frame and a single angle `(A, B, C)`:
+除关节角外，脚本还计算上半身与下半身的**带符号**前倾/后仰角。
+
+### 坐标系支持
+
+脚本支持两种坐标系：
+
+1. **Y轴向上** `[0, 1, 0]`：标准世界坐标系（推荐）
+2. **Y轴向下** `[0, -1, 0]`：Sam3D 相机坐标系
+
+脚本会自动检测 `up_axis` 的方向，调整计算逻辑以保证：
+- **正角度（+）始终表示前倾**
+- **负角度（-）始终表示后仰**
+
+### 计算方法
+
+中心点定义：
+
+- 骨盆中心：左右髋（ID 9 和 10）的平均
+- 肩中心：左右肩（ID 5 和 6）的平均
+- 膝中心：左右膝（ID 11 和 12）的平均
+
+左右轴优先取左右髋连线，否则取左右肩连线：
+
+$$
+\hat{lr} = \frac{(R - L)}{\|R - L\|}
+$$
+
+前向轴根据坐标系方向自动选择叉积顺序：
+
+- **Y轴向上时**：$\hat{fwd} = \frac{\hat{lr} \times \hat{up}}{\|\hat{lr} \times \hat{up}\|}$
+- **Y轴向下时**：$\hat{fwd} = \frac{\hat{up} \times \hat{lr}}{\|\hat{up} \times \hat{lr}\|}$
+
+每帧将身体向量投影到与左右轴正交的平面上，再与竖直轴求夹角：
+
+$$
+\vec{v}_{proj} = \vec{v} - (\vec{v} \cdot \hat{lr})\hat{lr}
+$$
+
+$$
+\theta = \arccos(\hat{v}_{proj} \cdot \hat{up})
+$$
+
+符号判定（右手定则）：
+
+- 若 $\hat{v}_{proj} \cdot \hat{fwd} \ge 0$，为正（前倾）
+- 否则为负（后仰）
+
+输出：
+
+- `tilt_upper`：上半身倾斜（肩中心相对骨盆中心）
+- `tilt_lower`：下半身倾斜（膝中心相对骨盆中心）
+
+## 角度公式
+
+对单帧单角度 `(A, B, C)`：
 
 - `BA = A - B`
 - `BC = C - B`
 
-The angle is:
+角度为：
 
 $$
-\theta = \arccos \left( \frac{BA \cdot BC}{\|BA\| \, \|BC\|} \right)
+	heta = \arccos \left( \frac{BA \cdot BC}{\|BA\| \, \|BC\|} \right)
 $$
 
-The result is converted from radians to degrees.
+最终输出单位为角度制。
 
-## Missing or Invalid Data
+## 缺失或无效数据
 
-- If any of the three joints has a non-finite value (`NaN` or `Inf`), the angle for that frame is `NaN`.
-- If either vector length is zero, the angle is `NaN`.
+- 若三点中任意一点为非有限值（`NaN` 或 `Inf`），该帧角度为 `NaN`。
+- 若向量长度为 0，则该帧角度为 `NaN`。
 
-## Output
+## 输出
 
-- A CSV file with one row per frame and one column per angle.
-- A PNG plot with one subplot per angle showing the time series.
+脚本会为每个人生成以下输出文件：
 
-## Notes
+### 关节角度
+- `angles_joint.csv`：关节角度时间序列数据
+- `angles_joint.png`：关节角度可视化图表
 
-- The angle computation is purely geometric; no temporal smoothing is applied here.
-- If you need ankle angles, you must include toe or foot tip joints in `TARGET_IDS` and define `(calf, ankle, toe)` tuples.
+### 身体倾斜角度
+
+为了支持不同坐标系，脚本会生成两套身体倾斜角度输出：
+
+**Y轴向上 `[0, 1, 0]`（标准世界坐标系）：**
+- `angles_body_y_up.csv`：Y轴向上时的身体倾斜角度数据
+- `angles_body_y_up.png`：Y轴向上时的身体倾斜角度可视化
+
+**Y轴向下 `[0, -1, 0]`（Sam3D 相机坐标系）：**
+- `angles_body_y_down.csv`：Y轴向下时的身体倾斜角度数据
+- `angles_body_y_down.png`：Y轴向下时的身体倾斜角度可视化
+
+**注意**：两套输出的正负号含义相同（前倾为正，后仰为负），用户可根据实际使用的坐标系选择对应的文件。
+
+## 备注
+
+- 角度计算为纯几何计算，不包含时间平滑。
+- 若需要踝关节角度，需要在 `TARGET_IDS` 中加入脚尖等关节点，并定义 `(calf, ankle, toe)` 三点。
+- 坐标系选择建议：
+  - 如果你的数据是标准的 3D 世界坐标（Y轴向上），使用 `angles_body_y_up.csv`
+  - 如果你的数据来自 Sam3D 原始输出（Y轴向下），使用 `angles_body_y_down.csv`
+  - 两者的正负号含义相同，前倾为正（+）、后仰为负（-）
+- 前向轴的计算使用右手定则，确保在不同坐标系下方向一致性。
