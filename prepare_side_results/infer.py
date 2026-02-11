@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 
 import cv2
+import numpy as np
 import torch
 from omegaconf.omegaconf import DictConfig
 from tqdm import tqdm
@@ -43,6 +44,41 @@ from .vis import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def select_closest_person(outputs):
+    """Select the closest person using camera depth, fallback to bbox area."""
+    if not outputs:
+        return outputs
+
+    cam_candidates = []
+    for i, out in enumerate(outputs):
+        cam_t = out.get("pred_cam_t")
+        if cam_t is None:
+            continue
+        cam_t = np.asarray(cam_t).reshape(-1)
+        if cam_t.size >= 3 and np.isfinite(cam_t[2]):
+            cam_candidates.append((float(cam_t[2]), i))
+
+    if cam_candidates:
+        _, best_idx = min(cam_candidates, key=lambda x: x[0])
+        return [outputs[best_idx]]
+
+    bbox_candidates = []
+    for i, out in enumerate(outputs):
+        bbox = out.get("bbox")
+        if bbox is None:
+            continue
+        bbox = np.asarray(bbox).reshape(-1)
+        if bbox.size >= 4:
+            area = max(0.0, float((bbox[2] - bbox[0]) * (bbox[3] - bbox[1])))
+            bbox_candidates.append((area, i))
+
+    if bbox_candidates:
+        _, best_idx = max(bbox_candidates, key=lambda x: x[0])
+        return [outputs[best_idx]]
+
+    return [outputs[0]]
 
 
 def setup_visualizer():
@@ -172,7 +208,10 @@ def process_one_video(
                 img=frames[idx],
                 bboxes=None,
             )
-
+        
+        # 选取离摄像头最近的人作为运动员
+        outputs = select_closest_person(outputs)
+        
         # 2D 结果可视化
         vis_results = visualize_2d_results(frames[idx], outputs, visualizer)
         cv2.imwrite(out_dir / f"frame_{idx:04d}_2d_visualization.png", vis_results[0])

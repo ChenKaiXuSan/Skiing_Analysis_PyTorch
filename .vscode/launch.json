@@ -44,35 +44,6 @@
       "console": "integratedTerminal"
     },
     {
-      "name": "vggt",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "vggt.main",
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "args": [
-        "infer.gpu=0",
-      ]
-    },
-    {
-      "name": "image_edit run",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "image_edit.main",
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "args": []
-    },
-    {
-      "name": "bundle_adjustment",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "bundle_adjustment.main",
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "args": []
-    },
-    {
       "name": "sam3d_body_run",
       "type": "debugpy",
       "request": "launch",
@@ -82,7 +53,8 @@
       "console": "integratedTerminal",
       "args": [
         "infer.gpu=0",
-        "infer.type=unity",
+        "infer.type=video",
+        "paths.video_path=/workspace/data/side_raw_pro",
       ]
     },
     {

@@ -111,9 +111,5 @@ def save_results(
 ) -> None:
     """Save all results including mesh files and visualizations."""
 
-    # FIXME: 需要修复一下
-    np.savez_compressed(
-        str(save_dir) + "_sam_3d_body_outputs.npz",
-        outputs,
-    )
+    np.savez_compressed(str(save_dir) + "_sam_3d_body_outputs.npz", outputs=outputs)
     logger.info(f"Saved outputs: {save_dir / f'sam_3d_body_outputs.npz'}")

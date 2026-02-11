@@ -47,7 +47,7 @@ def main(cfg: DictConfig) -> None:
         if not video_root.exists():
             raise FileNotFoundError(f"video_path not found: {video_root}")
         if not pt_root.exists():
-            raise FileNotFoundError(f"pt_path not found: {pt_root}")
+            pt_root = None
     elif cfg.infer.type == "unity":
         video_root = Path(cfg.paths.unity.video_path).resolve()
         pt_root = None
@@ -97,8 +97,12 @@ def main(cfg: DictConfig) -> None:
             if not pt_files:
                 logger.warning(f"[No pt] {subject_name} in {pt_root / subject_name}")
     else:
-        subjects_pt = ["male"]
-    
+        if cfg.infer.type=="unity":
+            subjects_pt = ["male"]
+        elif cfg.infer.type=="video":
+            subjects_pt = [k for k in videos_map.keys()]
+            
+
     # ---------------------------------------------------------------------- #
     # 构建 multi-view 任务（只保留多视角）
     # ---------------------------------------------------------------------- #
@@ -120,7 +124,9 @@ def main(cfg: DictConfig) -> None:
             pts = []
 
         if len(pts) != 0:
-            for vid, pt in zip(vids, pts):
+            pts_by_stem = {p.stem: p for p in pts}
+            for vid in vids:
+                pt = pts_by_stem.get(vid.stem)
                 if vid.stem == "osmo_1":
                     _pairs.append(("right", subject_name, vid, pt))
                 elif vid.stem == "osmo_2":
