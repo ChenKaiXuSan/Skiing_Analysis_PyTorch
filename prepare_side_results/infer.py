@@ -281,7 +281,6 @@ def process_one_video(
     estimator = setup_sam_3d_body(cfg)
     visualizer = setup_visualizer()
 
-    all_outputs = []
     previous_person = None  # Track previous frame's selected person
 
     for idx in tqdm(range(0, frames.shape[0]), desc="Processing frames"):
@@ -325,20 +324,18 @@ def process_one_video(
             image_name=frame_name,
         )
 
-
         # 处理输出并保存
         selected_output = outputs[0]
         selected_output["frame"] = frames[idx]
         
         # 保存用于下一帧比较
         previous_person = selected_output
-        all_outputs.append(selected_output)
-
-    # 保存最终结果
-    save_results(
-        outputs=all_outputs,
-        save_dir=inference_output_path,
-    )
+        
+        # 按帧保存结果
+        save_results(
+            outputs=[selected_output],
+            save_dir=inference_output_path / frame_name,
+        )
 
     # 清理资源
     torch.cuda.empty_cache()
