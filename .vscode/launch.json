@@ -105,5 +105,34 @@
       "console": "integratedTerminal",
       "args": []
     },
+    {
+      "name": "fuse_unity", 
+      "type": "debugpy",
+      "request": "launch",
+      "module": "main_unity",
+      "cwd": "/workspace/code/project",
+      "python": "/opt/conda/envs/sam_3d_body/bin/python",
+      "console": "integratedTerminal",
+    },
+    {
+      "name": "fuse_raw",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "main_raw",
+      "cwd": "/workspace/code/project",
+      "python": "/opt/conda/envs/sam_3d_body/bin/python",
+      "console": "integratedTerminal",
+      "args": []
+    },
+    {
+      "name": "angle_analysis",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "angle.main",
+      "cwd": "/workspace/code/project",
+      "python": "/opt/conda/envs/sam_3d_body/bin/python",
+      "console": "integratedTerminal",
+      "args": []
+    }
   ]
 }
