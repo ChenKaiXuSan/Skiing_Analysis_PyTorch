@@ -59,8 +59,18 @@ def main():
         person_name = person.name
         print(f"Processing person: {person_name}")
 
-        sam_l_path = person / "osmo_1_sam_3d_body_outputs.npz"
-        sam_r_path = person / "osmo_2_sam_3d_body_outputs.npz"
+        # Determine data format based on directory name
+        if person_name.startswith("pro"):
+            # pro format: left and right subdirectories
+            sam_l_path = person / "left"
+            sam_r_path = person / "right"
+        elif person_name.startswith("run"):
+            # run format: osmo_1 and osmo_2 files
+            sam_l_path = person / "osmo_1_sam_3d_body_outputs.npz"
+            sam_r_path = person / "osmo_2_sam_3d_body_outputs.npz"
+        else:
+            print(f"Unknown person format: {person_name}, skipping...")
+            continue
 
         paths = {
             "sam_l": str(sam_l_path),
