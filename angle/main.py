@@ -397,13 +397,44 @@ def plot_angles(out_path: Path, angles: Dict[str, np.ndarray]) -> None:
     if not angle_names:
         return
 
+    def _smooth_series(series: np.ndarray, window: int = 11) -> np.ndarray:
+        if window < 3:
+            return series.copy()
+        if window % 2 == 0:
+            window += 1
+        kernel = np.ones((window,), dtype=np.float64)
+        valid = np.isfinite(series).astype(np.float64)
+        filled = np.where(np.isfinite(series), series, 0.0)
+        num = np.convolve(filled, kernel, mode="same")
+        den = np.convolve(valid, kernel, mode="same")
+        smoothed = np.full_like(series, np.nan, dtype=np.float64)
+        mask = den > 0.0
+        smoothed[mask] = num[mask] / den[mask]
+        return smoothed
+
     rows = len(angle_names)
     fig, axes = plt.subplots(rows, 1, figsize=(10, max(3, rows * 2)), sharex=True)
     if rows == 1:
         axes = [axes]
 
     for ax, name in zip(axes, angle_names):
-        ax.plot(angles[name], label=name)
+        series = angles[name]
+        raw_line = ax.plot(
+            series,
+            label=f"{name} (raw)",
+            linewidth=1.0,
+            alpha=0.55,
+            zorder=1,
+        )[0]
+        ax.plot(
+            _smooth_series(series),
+            linestyle="--",
+            linewidth=2.4,
+            color=raw_line.get_color(),
+            alpha=0.95,
+            zorder=2,
+            label=f"{name} (smoothed)",
+        )
         ax.set_ylabel("deg")
         ax.legend(loc="upper right")
         ax.grid(True, linestyle="--", alpha=0.3)
@@ -658,6 +689,18 @@ def process_person(input_path: Path, output_dir: Path) -> None:
     plot_angles(joint_png, joint_angles)
     print(f"Joint angles saved to: {joint_csv}")
     print(f"Joint plot saved to: {joint_png}")
+
+    # Save knee angles separately (left and right knee angles)
+    knee_angles = {
+        "knee_l": joint_angles["knee_l"],
+        "knee_r": joint_angles["knee_r"],
+    }
+    knee_csv = output_dir / "angles_knee.csv"
+    knee_png = output_dir / "angles_knee.png"
+    save_angles_csv(knee_csv, knee_angles)
+    plot_angles(knee_png, knee_angles)
+    print(f"Knee angles saved to: {knee_csv}")
+    print(f"Knee plot saved to: {knee_png}")
 
     # Save torso-knee angle
     torso_csv = output_dir / "angles_torso_knee.csv"
