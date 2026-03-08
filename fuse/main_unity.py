@@ -1,37 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-"""
-File: /workspace/code/project/main.py
-Project: /workspace/code/project
-Created Date: Friday January 30th 2026
-Author: Kaixu Chen
------
-Comment:
+"""Batch pairwise camera fusion for Unity SAM 3D keypoints."""
 
-Have a good code time :)
------
-Last Modified: Friday January 30th 2026 3:58:30 pm
-Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
------
-Copyright (c) 2026 The University of Tsukuba
------
-HISTORY:
-Date      	By	Comments
-----------	---	---------------------------------------------------------
-"""
+from __future__ import annotations
+
+import argparse
+import itertools
 from pathlib import Path
+from typing import Dict, List, Tuple
+
 import numpy as np
 
-from project.load_unity import load
+from confidence import crossview_consistency_confidence, weakpersp_reproj_confidence
 from fuse import fuse_frame_3d, temporal_smooth_ema
-from confidence import (
-    weakpersp_reproj_confidence,
-    crossview_consistency_confidence,
-)
-from unity_data_compare import calculate_mpjpe
 from save import save_smoothed_results
 
-# --- 設定 ---
+
 UNITY_MHR70_MAPPING = {
     1: "Bone_Eye_L",
     2: "Bone_Eye_R",
@@ -51,112 +35,195 @@ UNITY_MHR70_MAPPING = {
 }
 TARGET_IDS = list(UNITY_MHR70_MAPPING.keys())
 
+# Indices for cross-view canonicalization in TARGET_IDS order.
+IDX_PELVIS = 14
+IDX_LHIP = 11
+IDX_RHIP = 12
+IDX_LSHO = 5
+IDX_RSHO = 6
 
-# --- メイン実行 ---
+
+def _discover_npz_files(input_root: Path) -> Dict[str, List[Path]]:
+    """Group camera output files by their parent folder relative to input root."""
+    groups: Dict[str, List[Path]] = {}
+    patterns = ["**/*sam_3d_body_outputs*.npz", "**/*.npz"]
+    candidates: List[Path] = []
+    for pat in patterns:
+        candidates.extend(input_root.glob(pat))
+        if candidates:
+            break
+
+    for path in sorted({p for p in candidates if p.is_file()}):
+        group_key = str(path.parent.relative_to(input_root))
+        groups.setdefault(group_key, []).append(path)
+    return groups
 
 
-def main():
-    # パス (適宜書き換えてください)
-    paths = {
-        "sam_l": "/workspace/data/sam3d_body_results/unity/male/left_sam_3d_body_outputs.npz",
-        "sam_r": "/workspace/data/sam3d_body_results/unity/male/right_sam_3d_body_outputs.npz",
-        "gt_2d_l": "/workspace/data/unity_data/RecordingsPose/cam_left camera/male_kpt2d_left camera_trimmed.jsonl",
-        "gt_2d_r": "/workspace/data/unity_data/RecordingsPose/cam_right camera/male_kpt2d_right camera_trimmed.jsonl",
-        "gt_3d": "/workspace/data/unity_data/RecordingsPose/male_pose3d_trimmed.jsonl",
-    }
+def _camera_name_from_path(path: Path) -> str:
+    stem = path.stem
+    suffixes = ["_sam_3d_body_outputs", "_sam_3d_body_output", "_outputs"]
+    for suffix in suffixes:
+        if stem.endswith(suffix):
+            return stem[: -len(suffix)]
+    return stem
 
-    all_frame_results = load(paths)
 
-    # 通过时间轴融合多帧
-    fused_seq = []
-    all_frame_3d_kpt_errors = []
+def _as_joint_dict(arr: np.ndarray) -> Dict[int, np.ndarray]:
+    out: Dict[int, np.ndarray] = {}
+    for idx, jid in enumerate(TARGET_IDS):
+        if idx >= len(arr):
+            continue
+        out[jid] = np.asarray(arr[idx], dtype=np.float64)
+    return out
 
-    for frame_idx, frame_data in all_frame_results.items():
-        print(f"Frame {frame_idx}:")
 
-        # ---- GT dicts (2D) ----
-        g2d_l = frame_data["L_2D"]["gt"]
-        g2d_r = frame_data["R_2D"]["gt"]
-        g3d_l = frame_data["L_3D"]["gt"]
-        g3d_r = frame_data["R_3D"]["gt"]
+def _load_sequence(npz_path: Path) -> List[Dict[str, Dict[int, np.ndarray]]]:
+    data = np.load(npz_path, allow_pickle=True)
+    key = "outputs" if "outputs" in data.files else data.files[0]
+    frames = data[key]
 
-        # ---- Sam preds ----
-        p2d_l_raw = frame_data["L_2D"]["pred"]
-        p3d_l_raw = frame_data["L_3D"]["pred"]
-        p2d_r_raw = frame_data["R_2D"]["pred"]
-        p3d_r_raw = frame_data["R_3D"]["pred"]
-
-        # 计算置信度
-        p3d_l_conf1, err_px, uhat, params = weakpersp_reproj_confidence(
-            p3d_l_raw, p2d_l_raw, sigma_px=12.0  # (70,3)  # (70,2)
+    seq: List[Dict[str, Dict[int, np.ndarray]]] = []
+    for frame in frames:
+        p2d = np.asarray(frame["pred_keypoints_2d"], dtype=np.float64)
+        p3d = np.asarray(frame["pred_keypoints_3d"], dtype=np.float64)
+        seq.append(
+            {
+                "p2d": _as_joint_dict(p2d[TARGET_IDS]),
+                "p3d": _as_joint_dict(p3d[TARGET_IDS]),
+            }
         )
-        print(p3d_l_conf1.shape, p3d_l_conf1.min(), p3d_l_conf1.max())
+    return seq
 
-        p3d_r_conf1, err_px, uhat, params = weakpersp_reproj_confidence(
-            p3d_r_raw, p2d_r_raw, sigma_px=12.0  # (70,3)  # (70,2)
-        )
-        print(p3d_r_conf1.shape, p3d_r_conf1.min(), p3d_r_conf1.max())
 
-        # 你需要把下面这些 index 换成你 MHR70 / sam3d 的真实 index
-        IDX_PELVIS = 14
-        IDX_LHIP = 11
-        IDX_RHIP = 12
-        IDX_LSHO = 5
-        IDX_RSHO = 6
+def _fuse_pair(
+    seq_a: List[Dict[str, Dict[int, np.ndarray]]],
+    seq_b: List[Dict[str, Dict[int, np.ndarray]]],
+    sigma_px: float,
+    sigma_3d: float,
+) -> List[Dict[int, np.ndarray]]:
+    num_frames = min(len(seq_a), len(seq_b))
+    fused_seq: List[Dict[int, np.ndarray]] = []
 
-        conf2, dist, Xlc, Xrc, info = crossview_consistency_confidence(
-            p3d_l_raw,
-            p3d_r_raw,
+    for i in range(num_frames):
+        p2d_a = seq_a[i]["p2d"]
+        p3d_a = seq_a[i]["p3d"]
+        p2d_b = seq_b[i]["p2d"]
+        p3d_b = seq_b[i]["p3d"]
+
+        conf_a, _, _, _ = weakpersp_reproj_confidence(p3d_a, p2d_a, sigma_px=sigma_px)
+        conf_b, _, _, _ = weakpersp_reproj_confidence(p3d_b, p2d_b, sigma_px=sigma_px)
+
+        conf_cross, _, _, _, _ = crossview_consistency_confidence(
+            p3d_a,
+            p3d_b,
             root_idx=IDX_PELVIS,
             left_hip_idx=IDX_LHIP,
             right_hip_idx=IDX_RHIP,
             left_shoulder_idx=IDX_LSHO,
             right_shoulder_idx=IDX_RSHO,
-            sigma_3d=0.08,
+            sigma_3d=sigma_3d,
             scale_mode="hip",
         )
-        print(conf2.shape, conf2.min(), conf2.max())
 
-        q_l_data = np.sqrt(p3d_l_conf1 * conf2)  # 简单又稳
-        q_r_data = np.sqrt(p3d_r_conf1 * conf2)
+        q_a = np.sqrt(np.clip(conf_a * conf_cross, 0.0, 1.0))
+        q_b = np.sqrt(np.clip(conf_b * conf_cross, 0.0, 1.0))
+        fused_seq.append(fuse_frame_3d(p3d_a, p3d_b, q_a, q_b, TARGET_IDS))
 
-        # ---- frame-wise fuse 3D ----
-        q_l = q_l_data
-        q_r = q_r_data
+    return fused_seq
 
-        fused_3d = fuse_frame_3d(p3d_l_raw, p3d_r_raw, q_l, q_r, TARGET_IDS)
-        print(f"  Fused 3D Keypoints: {fused_3d}")
-        fused_seq.append(fused_3d)
 
-        # 计算误差
-        mpjpe_3d = calculate_mpjpe(
-            fused_3d, g3d_l
-        )  # 简单起见，直接用平均2D作为3D的GT投影
-        print(f"  Fused 3D MPJPE (w.r.t. avg 3D GT): {mpjpe_3d:.2f} px")
-        all_frame_3d_kpt_errors.append(mpjpe_3d)
+def run_batch(
+    input_root: Path,
+    output_root: Path,
+    sigma_px: float,
+    sigma_3d: float,
+    alpha: float,
+    save_raw_fused: bool,
+) -> Tuple[int, int]:
+    groups = _discover_npz_files(input_root)
+    total_pairs = 0
+    total_saved = 0
 
-    # 输出temporal smoothing之前的平均3d误差
-    mean_mpjpe_3d = np.mean(all_frame_3d_kpt_errors)
-    print(f"Average Fused 3D MPJPE after fuse two view: {mean_mpjpe_3d:.2f} px")
+    for group_name, files in groups.items():
+        if len(files) < 2:
+            continue
 
-    # ---- temporal smoothing ----
-    smooth_seq = temporal_smooth_ema(fused_seq, TARGET_IDS, alpha=0.7)
+        out_dir = output_root / group_name
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 计算总误差
-    all_frame_3d_kpt_errors = {}
-    for i, fused_3d in enumerate(smooth_seq):
+        for path_a, path_b in itertools.combinations(files, 2):
+            cam_a = _camera_name_from_path(path_a)
+            cam_b = _camera_name_from_path(path_b)
+            pair_name = f"{cam_a}__{cam_b}"
 
-        mpjpe_3d = calculate_mpjpe(fused_3d, g3d_l)
-        all_frame_3d_kpt_errors[i] = {"mpjpe": mpjpe_3d}
+            seq_a = _load_sequence(path_a)
+            seq_b = _load_sequence(path_b)
+            fused_seq = _fuse_pair(seq_a, seq_b, sigma_px=sigma_px, sigma_3d=sigma_3d)
+            smooth_seq = temporal_smooth_ema(fused_seq, TARGET_IDS, alpha=alpha)
 
-    # 输出temporal smoothing之后的平均3d误差
-    mean_mpjpe_3d = np.mean([v["mpjpe"] for v in all_frame_3d_kpt_errors.values()])
-    print(f"Average Fused 3D MPJPE after smoothing: {mean_mpjpe_3d:.2f} px")
+            if save_raw_fused:
+                raw_path = out_dir / f"{pair_name}_fused.npy"
+                save_smoothed_results(fused_seq, TARGET_IDS, raw_path)
 
-    # save smoothed results
-    output_path = Path("/workspace/data/fused_smoothed_results") / "unity_smoothed_3d.npy"
-    saved_path = save_smoothed_results(smooth_seq, TARGET_IDS, output_path)
-    print(f"Smoothed results saved to: {saved_path}")
+            smooth_path = out_dir / f"{pair_name}_smoothed.npy"
+            save_smoothed_results(smooth_seq, TARGET_IDS, smooth_path)
+
+            print(f"[saved] {smooth_path}")
+            total_pairs += 1
+            total_saved += 1
+
+    return total_pairs, total_saved
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Pairwise fusion for Unity SAM 3D keypoints and save results."
+    )
+    parser.add_argument(
+        "--input-root",
+        type=Path,
+        default=Path("/workspace/data/sam3d_body_results/unity"),
+        help="Root folder containing SAM 3D npz outputs.",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path("/workspace/data/fused_smoothed_results/unity_pairs"),
+        help="Output folder for pairwise fused results.",
+    )
+    parser.add_argument("--sigma-px", type=float, default=12.0)
+    parser.add_argument("--sigma-3d", type=float, default=0.08)
+    parser.add_argument("--alpha", type=float, default=0.7)
+    parser.add_argument(
+        "--save-raw-fused",
+        action="store_true",
+        default=True,
+        help="Save pre-smoothing fused sequences (enabled by default).",
+    )
+    parser.add_argument(
+        "--no-save-raw-fused",
+        dest="save_raw_fused",
+        action="store_false",
+        help="Disable saving pre-smoothing fused sequences.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    pairs, saved = run_batch(
+        input_root=args.input_root,
+        output_root=args.output_root,
+        sigma_px=args.sigma_px,
+        sigma_3d=args.sigma_3d,
+        alpha=args.alpha,
+        save_raw_fused=args.save_raw_fused,
+    )
+    if pairs == 0:
+        print(f"No camera pairs found under: {args.input_root}")
+        return
+    print(f"Done. fused_pairs={pairs}, saved_files={saved}")
+
 
 if __name__ == "__main__":
     main()

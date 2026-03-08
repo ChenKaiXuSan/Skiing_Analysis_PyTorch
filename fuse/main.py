@@ -27,7 +27,7 @@ from confidence import (
     weakpersp_reproj_confidence,
     crossview_consistency_confidence,
 )
-from unity_data_compare import calculate_mpjpe
+from metrics.unity_data_compare import calculate_mpjpe
 from save import save_smoothed_results
 
 # --- 設定 ---
