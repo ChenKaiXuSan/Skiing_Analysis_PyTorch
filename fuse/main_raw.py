@@ -1,25 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-"""
-File: /workspace/code/project/main.py
-Project: /workspace/code/project
-Created Date: Friday January 30th 2026
-Author: Kaixu Chen
------
-Comment:
+"""Batch fusion for real person data (pro_*/run_* formats)."""
 
-Have a good code time :)
------
-Last Modified: Friday January 30th 2026 3:58:30 pm
-Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
------
-Copyright (c) 2026 The University of Tsukuba
------
-HISTORY:
-Date      	By	Comments
-----------	---	---------------------------------------------------------
-"""
-
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -51,69 +34,113 @@ UNITY_MHR70_MAPPING = {
 }
 TARGET_IDS = list(UNITY_MHR70_MAPPING.keys())
 
+IDX_PELVIS = 14
+IDX_LHIP = 11
+IDX_RHIP = 12
+IDX_LSHO = 5
+IDX_RSHO = 6
 
-def main():
-    paths = Path("/workspace/data/sam3d_body_results/person")
 
-    for person in paths.iterdir():
+def _resolve_person_paths(person_dir: Path):
+    person_name = person_dir.name
+    if person_name.startswith("pro"):
+        sam_l_path = person_dir / "left"
+        sam_r_path = person_dir / "right"
+    elif person_name.startswith("run"):
+        sam_l_path = person_dir / "osmo_1_sam_3d_body_outputs.npz"
+        sam_r_path = person_dir / "osmo_2_sam_3d_body_outputs.npz"
+    else:
+        return None
+
+    if not sam_l_path.exists() or not sam_r_path.exists():
+        return None
+    return {"sam_l": str(sam_l_path), "sam_r": str(sam_r_path)}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Fuse real person SAM3D pairs and save raw+smoothed outputs."
+    )
+    parser.add_argument(
+        "--input-root",
+        type=Path,
+        default=Path("/workspace/data/sam3d_body_results/person"),
+        help="Root folder containing pro_*/run_* person directories.",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path("/workspace/data/fused_smoothed_results"),
+        help="Output folder for fused results.",
+    )
+    parser.add_argument("--sigma-px", type=float, default=12.0)
+    parser.add_argument("--sigma-3d", type=float, default=0.08)
+    parser.add_argument("--alpha", type=float, default=0.7)
+    parser.add_argument(
+        "--no-adaptive-smooth",
+        dest="adaptive_smooth",
+        action="store_false",
+        help="Disable speed/joint adaptive EMA and use fixed alpha.",
+    )
+    parser.set_defaults(adaptive_smooth=True)
+    parser.add_argument("--smooth-alpha-min", type=float, default=0.45)
+    parser.add_argument("--smooth-alpha-max", type=float, default=0.92)
+    parser.add_argument("--smooth-speed-gain", type=float, default=0.25)
+    parser.add_argument(
+        "--save-raw-fused",
+        action="store_true",
+        default=True,
+        help="Save pre-smoothing fused sequences (enabled by default).",
+    )
+    parser.add_argument(
+        "--no-save-raw-fused",
+        dest="save_raw_fused",
+        action="store_false",
+        help="Disable saving pre-smoothing fused sequences.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    args.output_root.mkdir(parents=True, exist_ok=True)
+
+    total_people = 0
+
+    for person in sorted(args.input_root.iterdir()):
+        if not person.is_dir():
+            continue
+
         person_name = person.name
         print(f"Processing person: {person_name}")
 
-        # Determine data format based on directory name
-        if person_name.startswith("pro"):
-            # pro format: left and right subdirectories
-            sam_l_path = person / "left"
-            sam_r_path = person / "right"
-        elif person_name.startswith("run"):
-            # run format: osmo_1 and osmo_2 files
-            sam_l_path = person / "osmo_1_sam_3d_body_outputs.npz"
-            sam_r_path = person / "osmo_2_sam_3d_body_outputs.npz"
-        else:
-            print(f"Unknown person format: {person_name}, skipping...")
+        paths = _resolve_person_paths(person)
+        if paths is None:
+            print(f"Skipped person (unsupported format or missing files): {person_name}")
             continue
 
-        paths = {
-            "sam_l": str(sam_l_path),
-            "sam_r": str(sam_r_path),
-        }
-
         all_frame_results = load_raw(paths)
-
-        # 通过时间轴融合多帧
         fused_seq = []
 
         for frame_idx, frame_data in all_frame_results.items():
-            print(f"Frame {frame_idx}:")
-
-            # ---- Sam preds ----
             p2d_l_raw = frame_data["L_2D"]["pred"]
             p3d_l_raw = frame_data["L_3D"]["pred"]
             p2d_r_raw = frame_data["R_2D"]["pred"]
             p3d_r_raw = frame_data["R_3D"]["pred"]
 
-            # 计算置信度
-            p3d_l_conf1, err_px, uhat, params = weakpersp_reproj_confidence(
+            p3d_l_conf1, _, _, _ = weakpersp_reproj_confidence(
                 p3d_l_raw,
                 p2d_l_raw,
-                sigma_px=12.0,  # (70,3)  # (70,2)
+                sigma_px=args.sigma_px,
             )
-            print(p3d_l_conf1.shape, p3d_l_conf1.min(), p3d_l_conf1.max())
 
-            p3d_r_conf1, err_px, uhat, params = weakpersp_reproj_confidence(
+            p3d_r_conf1, _, _, _ = weakpersp_reproj_confidence(
                 p3d_r_raw,
                 p2d_r_raw,
-                sigma_px=12.0,  # (70,3)  # (70,2)
+                sigma_px=args.sigma_px,
             )
-            print(p3d_r_conf1.shape, p3d_r_conf1.min(), p3d_r_conf1.max())
 
-            # 你需要把下面这些 index 换成你 MHR70 / sam3d 的真实 index
-            IDX_PELVIS = 14
-            IDX_LHIP = 11
-            IDX_RHIP = 12
-            IDX_LSHO = 5
-            IDX_RSHO = 6
-
-            conf2, dist, Xlc, Xrc, info = crossview_consistency_confidence(
+            conf2, _, _, _, _ = crossview_consistency_confidence(
                 p3d_l_raw,
                 p3d_r_raw,
                 root_idx=IDX_PELVIS,
@@ -121,31 +148,37 @@ def main():
                 right_hip_idx=IDX_RHIP,
                 left_shoulder_idx=IDX_LSHO,
                 right_shoulder_idx=IDX_RSHO,
-                sigma_3d=0.08,
+                sigma_3d=args.sigma_3d,
                 scale_mode="hip",
             )
-            print(conf2.shape, conf2.min(), conf2.max())
 
-            q_l_data = np.sqrt(p3d_l_conf1 * conf2)  # 简单又稳
+            q_l_data = np.sqrt(p3d_l_conf1 * conf2)
             q_r_data = np.sqrt(p3d_r_conf1 * conf2)
 
-            # ---- frame-wise fuse 3D ----
-            q_l = q_l_data
-            q_r = q_r_data
-
-            fused_3d = fuse_frame_3d(p3d_l_raw, p3d_r_raw, q_l, q_r, TARGET_IDS)
-            print(f"  Fused 3D Keypoints: {fused_3d}")
+            fused_3d = fuse_frame_3d(p3d_l_raw, p3d_r_raw, q_l_data, q_r_data, TARGET_IDS)
             fused_seq.append(fused_3d)
 
-        # ---- temporal smoothing ----
-        smooth_seq = temporal_smooth_ema(fused_seq, TARGET_IDS, alpha=0.7)
-
-        # save smoothed results
-        output_path = (
-            Path("/workspace/data/fused_smoothed_results") / f"{person_name}.npy"
+        smooth_seq = temporal_smooth_ema(
+            fused_seq,
+            TARGET_IDS,
+            alpha=args.alpha,
+            adaptive=args.adaptive_smooth,
+            alpha_min=args.smooth_alpha_min,
+            alpha_max=args.smooth_alpha_max,
+            speed_gain=args.smooth_speed_gain,
         )
-        saved_path = save_smoothed_results(smooth_seq, TARGET_IDS, output_path)
-        print(f"Smoothed results saved to: {saved_path}")
+
+        if args.save_raw_fused:
+            raw_path = args.output_root / f"{person_name}_fused.npy"
+            save_smoothed_results(fused_seq, TARGET_IDS, raw_path)
+            print(f"[saved] {raw_path}")
+
+        smooth_path = args.output_root / f"{person_name}_smoothed.npy"
+        save_smoothed_results(smooth_seq, TARGET_IDS, smooth_path)
+        print(f"[saved] {smooth_path}")
+        total_people += 1
+
+    print(f"Done. processed_people={total_people}")
 
 
 if __name__ == "__main__":

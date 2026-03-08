@@ -317,17 +317,45 @@ def temporal_smooth_ema(
     fused_seq_dicts: List[Dict[int, Iterable[float]]],
     target_ids: List[int],
     alpha: float = 0.7,
+    adaptive: bool = True,
+    alpha_min: float = 0.45,
+    alpha_max: float = 0.92,
+    speed_gain: float = 0.25,
 ) -> List[Dict[int, np.ndarray]]:
     """
     EMA smoothing on fused 3D sequence.
     alpha: larger -> follow current more; smaller -> smoother
+
+    adaptive=True enables:
+      1) per-joint base alpha (core joints smoother, limb endpoints more responsive)
+      2) speed-adaptive alpha (fast motion -> larger alpha, less lag)
     """
     T = len(fused_seq_dicts)
     J = len(target_ids)
 
+    if T == 0:
+        return []
+
     X = np.full((T, J, 3), np.nan, dtype=np.float64)
     for t in range(T):
         X[t] = dict_to_array(fused_seq_dicts[t], target_ids)
+
+    # Joint-aware base alpha: keep torso/head smoother, extremities more responsive.
+    # Note: larger alpha follows current frame more (less smoothing).
+    core_ids = {1, 2, 69}  # eyes + neck
+    limb_ids = {5, 6, 7, 8, 9, 10, 11, 12}
+    endpoint_ids = {13, 14, 41, 62}  # feet + hands
+
+    alpha_joint = np.full((J,), float(alpha), dtype=np.float64)
+    if adaptive:
+        for j, jid in enumerate(target_ids):
+            if jid in core_ids:
+                alpha_joint[j] = alpha * 0.85
+            elif jid in limb_ids:
+                alpha_joint[j] = alpha * 1.00
+            elif jid in endpoint_ids:
+                alpha_joint[j] = alpha * 1.15
+        alpha_joint = np.clip(alpha_joint, alpha_min, alpha_max)
 
     Y = np.full_like(X, np.nan)
     Y[0] = X[0]
@@ -340,7 +368,22 @@ def temporal_smooth_ema(
         ok_prev = np.all(np.isfinite(yt_prev), axis=1)
 
         both = ok_x & ok_prev
-        Y[t, both] = alpha * xt[both] + (1 - alpha) * yt_prev[both]
+        if np.any(both):
+            if adaptive:
+                # Use previous smoothed frame as stable velocity reference.
+                speed = np.linalg.norm(xt[both] - yt_prev[both], axis=1)
+                alpha_dyn = np.clip(
+                    alpha_joint[both] + speed_gain * speed,
+                    alpha_min,
+                    alpha_max,
+                )
+            else:
+                alpha_dyn = np.full((np.count_nonzero(both),), float(alpha), dtype=np.float64)
+
+            Y[t, both] = (
+                alpha_dyn[:, None] * xt[both]
+                + (1.0 - alpha_dyn)[:, None] * yt_prev[both]
+            )
 
         miss_x = ~ok_x & ok_prev
         Y[t, miss_x] = yt_prev[miss_x]

@@ -138,6 +138,10 @@ def run_batch(
     sigma_px: float,
     sigma_3d: float,
     alpha: float,
+    adaptive_smooth: bool,
+    smooth_alpha_min: float,
+    smooth_alpha_max: float,
+    smooth_speed_gain: float,
     save_raw_fused: bool,
 ) -> Tuple[int, int]:
     groups = _discover_npz_files(input_root)
@@ -159,7 +163,15 @@ def run_batch(
             seq_a = _load_sequence(path_a)
             seq_b = _load_sequence(path_b)
             fused_seq = _fuse_pair(seq_a, seq_b, sigma_px=sigma_px, sigma_3d=sigma_3d)
-            smooth_seq = temporal_smooth_ema(fused_seq, TARGET_IDS, alpha=alpha)
+            smooth_seq = temporal_smooth_ema(
+                fused_seq,
+                TARGET_IDS,
+                alpha=alpha,
+                adaptive=adaptive_smooth,
+                alpha_min=smooth_alpha_min,
+                alpha_max=smooth_alpha_max,
+                speed_gain=smooth_speed_gain,
+            )
 
             if save_raw_fused:
                 raw_path = out_dir / f"{pair_name}_fused.npy"
@@ -195,6 +207,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sigma-3d", type=float, default=0.08)
     parser.add_argument("--alpha", type=float, default=0.7)
     parser.add_argument(
+        "--no-adaptive-smooth",
+        dest="adaptive_smooth",
+        action="store_false",
+        help="Disable speed/joint adaptive EMA and use fixed alpha.",
+    )
+    parser.set_defaults(adaptive_smooth=True)
+    parser.add_argument(
+        "--smooth-alpha-min",
+        type=float,
+        default=0.45,
+        help="Lower bound for adaptive EMA alpha.",
+    )
+    parser.add_argument(
+        "--smooth-alpha-max",
+        type=float,
+        default=0.92,
+        help="Upper bound for adaptive EMA alpha.",
+    )
+    parser.add_argument(
+        "--smooth-speed-gain",
+        type=float,
+        default=0.25,
+        help="Speed-to-alpha gain for adaptive EMA.",
+    )
+    parser.add_argument(
         "--save-raw-fused",
         action="store_true",
         default=True,
@@ -217,6 +254,10 @@ def main() -> None:
         sigma_px=args.sigma_px,
         sigma_3d=args.sigma_3d,
         alpha=args.alpha,
+        adaptive_smooth=args.adaptive_smooth,
+        smooth_alpha_min=args.smooth_alpha_min,
+        smooth_alpha_max=args.smooth_alpha_max,
+        smooth_speed_gain=args.smooth_speed_gain,
         save_raw_fused=args.save_raw_fused,
     )
     if pairs == 0:

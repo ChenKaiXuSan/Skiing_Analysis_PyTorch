@@ -20,6 +20,9 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
+# TODO: 需要按照滑雪者面向前方的位置来划分滑雪的trun。
+# TODO: 因为run和pro的长度不一样，所以没有办法直接进行比较。我需要先把每个人的动作划分成几个turn，然后在每个turn里比较融合前后的角度变化情况。
+
 import csv
 from pathlib import Path
 from typing import Dict, Tuple
