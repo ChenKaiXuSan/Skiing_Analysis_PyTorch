@@ -8,6 +8,9 @@ Author: Kaixu Chen
 -----
 Comment:
 
+需要按照滑雪者面向前方的位置来划分滑雪的trun。
+因为run和pro的长度不一样，所以没有办法直接进行比较。我需要先把每个人的动作划分成几个turn，然后在每个turn里比较融合前后的角度变化情况。
+
 Have a good code time :)
 -----
 Last Modified: Wednesday February 11th 2026 1:41:43 pm
@@ -20,15 +23,11 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
-# TODO: 需要按照滑雪者面向前方的位置来划分滑雪的trun。
-# TODO: 因为run和pro的长度不一样，所以没有办法直接进行比较。我需要先把每个人的动作划分成几个turn，然后在每个turn里比较融合前后的角度变化情况。
-
 import csv
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 
 # --- 設定 ---
@@ -504,6 +503,28 @@ def save_turn_detail_files(
         if change_turn:
             save_angles_csv(turn_dir / "angles_change_fullframe.csv", change_turn)
             plot_angles(turn_dir / "angles_change_fullframe.png", change_turn)
+
+
+def save_turn_elbow_position_visualizations(
+    kpts: np.ndarray,
+    id_to_index: Dict[int, int],
+    turns: List[Dict[str, float]],
+    turn_eval_dir: Path,
+) -> None:
+    """Save elbow-position visualization into each turn folder."""
+    turn_root = turn_eval_dir / "turn_details"
+    turn_root.mkdir(parents=True, exist_ok=True)
+
+    for turn in turns:
+        turn_id = int(turn["turn_id"])
+        s = int(turn["start_frame"])
+        e = int(turn["end_frame"])
+        turn_dir = turn_root / f"turn_{turn_id}_{s}_{e}"
+        turn_dir.mkdir(parents=True, exist_ok=True)
+
+        # Slice frames to this turn and reuse existing visualization logic.
+        turn_kpts = kpts[s : e + 1]
+        visualize_elbow_position(turn_kpts, id_to_index, turn_dir)
 
 
 def _series_turn_mean(
@@ -1203,37 +1224,37 @@ def main():
     input_path = Path("/workspace/data/dual_view_pose/fused_smoothed_results")
     output_dir = Path("/workspace/data/dual_view_pose/angle_outputs")
 
-    # Process direct npy files (single-stream reports).
-    for person in sorted(input_path.glob("*.npy")):
-        person_name = person.stem
-        print(f"Processing person: {person_name}")
-        person_output_dir = output_dir / "pair_not_turn_comparison" / person_name
+    def _person_and_variant(stem: str) -> Tuple[str, str]:
+        if stem.endswith("_smoothed"):
+            return stem[: -len("_smoothed")], "smoothed"
+        if stem.endswith("_fused"):
+            return stem[: -len("_fused")], "non_smoothed"
+        return stem, "non_smoothed"
+
+    all_npy_files = sorted(input_path.rglob("*.npy"))
+    if not all_npy_files:
+        print(f"No npy files found under: {input_path}")
+        return
+
+    # Evaluate every npy sequence and split outputs into non-turn/turn folders.
+    for npy_file in all_npy_files:
+        rel = npy_file.relative_to(input_path)
+        person_name, variant = _person_and_variant(npy_file.stem)
+        print(f"Processing npy: {rel}")
+
+        person_output_dir = (
+            output_dir / "person_based_evaluation" / person_name / variant / rel.parent
+        )
         person_output_dir.mkdir(parents=True, exist_ok=True)
-        process_person(person, person_output_dir)
-
-    # Process fused/smoothed paired files for turn-by-turn comparison.
-    pair_dir = input_path / "person_pairs"
-    if pair_dir.exists() and pair_dir.is_dir():
-        smoothed_files = sorted(pair_dir.glob("*_smoothed.npy"))
-        for smoothed in smoothed_files:
-            base_name = smoothed.stem.replace("_smoothed", "")
-            fused = pair_dir / f"{base_name}_fused.npy"
-            if not fused.exists():
-                print(f"Skip pair {base_name}: fused file not found")
-                continue
-
-            pair_out = output_dir / "pair_turn_comparison" / base_name
-            pair_out.mkdir(parents=True, exist_ok=True)
-            print(f"Processing pair: {base_name}")
-            process_person_pair(smoothed, fused, pair_out)
+        process_person(npy_file, person_output_dir)
 
 
 def process_person(input_path: Path, output_dir: Path) -> None:
     kpts = np.load(input_path)
-    fullframe_dir = output_dir / "fullframe"
-    by_turn_dir = output_dir / "by_turn"
-    fullframe_dir.mkdir(parents=True, exist_ok=True)
-    by_turn_dir.mkdir(parents=True, exist_ok=True)
+    non_turn_dir = output_dir / "non_turn_evaluation"
+    turn_dir = output_dir / "turn_evaluation"
+    non_turn_dir.mkdir(parents=True, exist_ok=True)
+    turn_dir.mkdir(parents=True, exist_ok=True)
 
     up_axis_y_down = np.array([0.0, -1.0, 0.0], dtype=np.float64)  # Y-axis down
     (
@@ -1247,8 +1268,8 @@ def process_person(input_path: Path, output_dir: Path) -> None:
     ) = _compute_all_series(kpts, up_axis_y_down)
 
     # Save joint angles
-    joint_csv = fullframe_dir / "angles_joint.csv"
-    joint_png = fullframe_dir / "angles_joint.png"
+    joint_csv = non_turn_dir / "angles_joint.csv"
+    joint_png = non_turn_dir / "angles_joint.png"
     save_angles_csv(joint_csv, joint_angles)
     plot_angles(joint_png, joint_angles)
     print(f"Joint angles saved to: {joint_csv}")
@@ -1259,40 +1280,40 @@ def process_person(input_path: Path, output_dir: Path) -> None:
         "knee_l": joint_angles["knee_l"],
         "knee_r": joint_angles["knee_r"],
     }
-    knee_csv = fullframe_dir / "angles_knee.csv"
-    knee_png = fullframe_dir / "angles_knee.png"
+    knee_csv = non_turn_dir / "angles_knee.csv"
+    knee_png = non_turn_dir / "angles_knee.png"
     save_angles_csv(knee_csv, knee_angles)
     plot_angles(knee_png, knee_angles)
     print(f"Knee angles saved to: {knee_csv}")
     print(f"Knee plot saved to: {knee_png}")
 
     # Save torso-knee angle
-    torso_csv = fullframe_dir / "angles_torso_knee.csv"
-    torso_png = fullframe_dir / "angles_torso_knee.png"
+    torso_csv = non_turn_dir / "angles_torso_knee.csv"
+    torso_png = non_turn_dir / "angles_torso_knee.png"
     save_angles_csv(torso_csv, torso_knee)
     plot_angles(torso_png, torso_knee)
     print(f"Torso-knee angle saved to: {torso_csv}")
     print(f"Torso-knee plot saved to: {torso_png}")
 
     # Save knee difference
-    knee_diff_csv = fullframe_dir / "angles_knee_diff.csv"
-    knee_diff_png = fullframe_dir / "angles_knee_diff.png"
+    knee_diff_csv = non_turn_dir / "angles_knee_diff.csv"
+    knee_diff_png = non_turn_dir / "angles_knee_diff.png"
     save_angles_csv(knee_diff_csv, knee_diff)
     plot_angles(knee_diff_png, knee_diff)
     print(f"Knee difference saved to: {knee_diff_csv}")
     print(f"Knee difference plot saved to: {knee_diff_png}")
 
     # Save elbow distances
-    elbow_csv = fullframe_dir / "distance_elbow_midline.csv"
-    elbow_png = fullframe_dir / "distance_elbow_midline.png"
+    elbow_csv = non_turn_dir / "distance_elbow_midline.csv"
+    elbow_png = non_turn_dir / "distance_elbow_midline.png"
     save_angles_csv(elbow_csv, elbow_dist)
     plot_angles(elbow_png, elbow_dist)
     print(f"Elbow distances saved to: {elbow_csv}")
     print(f"Elbow distance plot saved to: {elbow_png}")
 
     # Save body angles (Y-axis down)
-    body_csv_y_down = fullframe_dir / "angles_body_y_down.csv"
-    body_png_y_down = fullframe_dir / "angles_body_y_down.png"
+    body_csv_y_down = non_turn_dir / "angles_body_y_down.csv"
+    body_png_y_down = non_turn_dir / "angles_body_y_down.png"
     save_angles_csv(body_csv_y_down, body_angles_y_down)
     plot_angles(body_png_y_down, body_angles_y_down)
     print(f"Body angles (Y-down) saved to: {body_csv_y_down}")
@@ -1308,21 +1329,23 @@ def process_person(input_path: Path, output_dir: Path) -> None:
     }
 
     # Save full-frame changes before turn splitting.
-    change_series = save_fullframe_change_reports(fullframe_dir, base_series)
+    change_series = save_fullframe_change_reports(non_turn_dir, base_series)
+
+    # Visualize elbow position relative to body first, so it is available
+    # even when turn-detail plotting is interrupted.
+    visualize_elbow_position(kpts, ID_TO_INDEX, non_turn_dir)
+
+    # Visualize 3D keypoints
+    visualization_dir = non_turn_dir / "skeleton_visualization"
+    visualize_3d_keypoints(kpts, ID_TO_INDEX, visualization_dir, num_frames_to_save=5)
+    print(f"3D skeleton visualization saved to: {visualization_dir}")
 
     # Turn-level reports also include change metrics.
     report_series = {**base_series, **change_series}
-    save_turn_reports(by_turn_dir, turns, heading_deg, report_series)
-    print(f"Turn summary saved to: {by_turn_dir / 'turn_summary.csv'}")
-    print(f"Turn metrics saved to: {by_turn_dir / 'turn_metrics.csv'}")
-
-    # Visualize elbow position relative to body
-    visualize_elbow_position(kpts, ID_TO_INDEX, fullframe_dir)
-
-    # Visualize 3D keypoints
-    visualization_dir = fullframe_dir / "skeleton_visualization"
-    visualize_3d_keypoints(kpts, ID_TO_INDEX, visualization_dir, num_frames_to_save=5)
-    print(f"3D skeleton visualization saved to: {visualization_dir}")
+    save_turn_reports(turn_dir, turns, heading_deg, report_series)
+    save_turn_elbow_position_visualizations(kpts, ID_TO_INDEX, turns, turn_dir)
+    print(f"Turn summary saved to: {turn_dir / 'turn_summary.csv'}")
+    print(f"Turn metrics saved to: {turn_dir / 'turn_metrics.csv'}")
 
 
 def process_person_pair(
@@ -1372,10 +1395,10 @@ def process_person_pair(
 
     before_dir = output_dir / "before_smoothed"
     after_dir = output_dir / "after_fused"
-    before_fullframe_dir = before_dir / "fullframe"
-    before_by_turn_dir = before_dir / "by_turn"
-    after_fullframe_dir = after_dir / "fullframe"
-    after_by_turn_dir = after_dir / "by_turn"
+    before_fullframe_dir = before_dir / "non_turn_evaluation"
+    before_by_turn_dir = before_dir / "turn_evaluation"
+    after_fullframe_dir = after_dir / "non_turn_evaluation"
+    after_by_turn_dir = after_dir / "turn_evaluation"
 
     before_fullframe_dir.mkdir(parents=True, exist_ok=True)
     before_by_turn_dir.mkdir(parents=True, exist_ok=True)
@@ -1396,6 +1419,18 @@ def process_person_pair(
 
     save_turn_reports(before_by_turn_dir, turns_before, heading_before, before_series)
     save_turn_reports(after_by_turn_dir, turns_after, heading_after, after_series)
+    save_turn_elbow_position_visualizations(
+        kpts_before,
+        ID_TO_INDEX,
+        turns_before,
+        before_by_turn_dir,
+    )
+    save_turn_elbow_position_visualizations(
+        kpts_after,
+        ID_TO_INDEX,
+        turns_after,
+        after_by_turn_dir,
+    )
 
     compare_csv = output_dir / "turn_compare_fused_vs_smoothed.csv"
     save_turn_comparison_report(
