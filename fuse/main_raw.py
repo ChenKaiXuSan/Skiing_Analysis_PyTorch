@@ -11,7 +11,7 @@ from .confidence import (
     weakpersp_reproj_confidence,
 )
 from .fuse import fuse_frame_3d, temporal_smooth_ema
-from .load_raw import load_raw
+from .load.load_raw import load_raw
 from .save import save_smoothed_results
 
 IDX_PELVIS = 14
@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input-root",
         type=Path,
-        default=Path("/workspace/data/sam3d_body_results/person"),
+        default=Path("/workspace/data/dual_view_pose/sam3d_body_results/person"),
         help="Root folder containing pro_*/run_* person directories.",
     )
     parser.add_argument(
@@ -114,7 +114,7 @@ def main() -> None:
 
             # 获取所有关节点id
             if all_joint_ids is None:
-                all_joint_ids = sorted(set(p3d_l_raw.keys()) | set(p3d_r_raw.keys()))
+                all_joint_ids = sorted(range(len(p2d_l_raw) + 1))
 
             # 计算置信度
             p3d_l_conf1, _, _, _ = weakpersp_reproj_confidence(

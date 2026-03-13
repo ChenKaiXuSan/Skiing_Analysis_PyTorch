@@ -98,6 +98,7 @@ def load_sam_data(path):
     # 如果都不是，抛出错误
     raise FileNotFoundError(f"Cannot load SAM data from {path}")
 
+
 def get_sam_pred_dicts(sam_frame):
     """Sam3Dの1フレーム分の予測データを辞書形式に整理"""
     pred_2d = sam_frame["pred_keypoints_2d"]
@@ -122,13 +123,20 @@ def load_raw(paths: dict):
     all_frame_results = {}
 
     for i in range(num_frames):
+        p2d_l_dict = {}
+        p2d_r_dict = {}
+        p3d_l_dict = {}
+        p3d_r_dict = {}
+
         p2d_l, p3d_l = get_sam_pred_dicts(sam_l[i])
         p2d_r, p3d_r = get_sam_pred_dicts(sam_r[i])
 
-        p2d_l = {k: v for k, v in sorted(p2d_l.items())}
-        p2d_r = {k: v for k, v in sorted(p2d_r.items())}
-        p3d_l = {k: v for k, v in sorted(p3d_l.items())}
-        p3d_r = {k: v for k, v in sorted(p3d_r.items())}
+        for i in range(p3d_l.shape[0]):
+            p2d_l_dict[i] = p2d_l[i]
+            p3d_l_dict[i] = p3d_l[i]
+        for i in range(p3d_r.shape[0]):
+            p2d_r_dict[i] = p2d_r[i]
+            p3d_r_dict[i] = p3d_r[i]
 
         all_frame_results[i] = {
             "L_2D": {"pred": p2d_l, "gt": None},
