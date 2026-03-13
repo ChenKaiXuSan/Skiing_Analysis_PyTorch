@@ -122,14 +122,14 @@ def load_raw(paths: dict):
     num_frames = min(len(sam_l), len(sam_r))
     all_frame_results = {}
 
-    for i in range(num_frames):
+    for idx in range(num_frames):
         p2d_l_dict = {}
         p2d_r_dict = {}
         p3d_l_dict = {}
         p3d_r_dict = {}
 
-        p2d_l, p3d_l = get_sam_pred_dicts(sam_l[i])
-        p2d_r, p3d_r = get_sam_pred_dicts(sam_r[i])
+        p2d_l, p3d_l = get_sam_pred_dicts(sam_l[idx])
+        p2d_r, p3d_r = get_sam_pred_dicts(sam_r[idx])
 
         for i in range(p3d_l.shape[0]):
             p2d_l_dict[i] = p2d_l[i]
@@ -138,11 +138,11 @@ def load_raw(paths: dict):
             p2d_r_dict[i] = p2d_r[i]
             p3d_r_dict[i] = p3d_r[i]
 
-        all_frame_results[i] = {
-            "L_2D": {"pred": p2d_l, "gt": None},
-            "R_2D": {"pred": p2d_r, "gt": None},
-            "L_3D": {"pred": p3d_l, "gt": None},
-            "R_3D": {"pred": p3d_r, "gt": None},
+        all_frame_results[idx] = {
+            "L_2D": {"pred": p2d_l_dict, "gt": None},
+            "R_2D": {"pred": p2d_r_dict, "gt": None},
+            "L_3D": {"pred": p3d_l_dict, "gt": None},
+            "R_3D": {"pred": p3d_r_dict, "gt": None},
         }
 
     return all_frame_results

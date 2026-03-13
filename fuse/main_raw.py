@@ -39,12 +39,16 @@ def _resolve_person_paths(person_dir: Path):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Fuse real person SAM3D pairs and save raw+smoothed outputs."
+        description=(
+            "Fuse real person SAM3D pairs and save raw+smoothed outputs."
+        )
     )
     parser.add_argument(
         "--input-root",
         type=Path,
-        default=Path("/workspace/data/dual_view_pose/sam3d_body_results/person"),
+        default=Path(
+            "/workspace/data/dual_view_pose/sam3d_body_results/person"
+        ),
         help="Root folder containing pro_*/run_* person directories.",
     )
     parser.add_argument(
@@ -94,27 +98,31 @@ def main() -> None:
         person_name = person.name
         print(f"Processing person: {person_name}")
 
+        if "pro" in person_name: 
+            continue;
+
         paths = _resolve_person_paths(person)
         if paths is None:
-            print(
-                f"Skipped person (unsupported format or missing files): {person_name}"
-            )
+            msg = "Skipped person (unsupported format or missing files):"
+            print(msg, person_name)
             continue
 
         all_frame_results = load_raw(paths)
+        if not all_frame_results:
+            continue
+
+        # 预先取第一帧来确定关节数量（SAM 输出按索引排列）
+        first_frame = next(iter(all_frame_results.values()))
+        p3d_first = first_frame["L_3D"]["pred"]
+        all_joint_ids = list(range(len(p3d_first)))
 
         fused_seq = []
-        all_joint_ids = None
 
-        for frame_idx, frame_data in all_frame_results.items():
+        for frame_data in all_frame_results.values():
             p2d_l_raw = frame_data["L_2D"]["pred"]
             p3d_l_raw = frame_data["L_3D"]["pred"]
             p2d_r_raw = frame_data["R_2D"]["pred"]
             p3d_r_raw = frame_data["R_3D"]["pred"]
-
-            # 获取所有关节点id
-            if all_joint_ids is None:
-                all_joint_ids = sorted(range(len(p2d_l_raw) + 1))
 
             # 计算置信度
             p3d_l_conf1, _, _, _ = weakpersp_reproj_confidence(
@@ -150,7 +158,7 @@ def main() -> None:
             fused_seq.append(fused_3d)
 
         smooth_seq = temporal_smooth_ema(
-            fused_seq,
+            fused_seq,  # type: ignore[arg-type]
             all_joint_ids,
             alpha=args.alpha,
             adaptive=args.adaptive_smooth,
@@ -161,11 +169,19 @@ def main() -> None:
 
         if args.save_raw_fused:
             raw_path = args.output_root / f"{person_name}_fused.npy"
-            save_smoothed_results(fused_seq, all_joint_ids, raw_path)
+            save_smoothed_results(
+                fused_seq,  # type: ignore[arg-type]
+                all_joint_ids,
+                raw_path,
+            )
             print(f"[saved] {raw_path}")
 
         smooth_path = args.output_root / f"{person_name}_smoothed.npy"
-        save_smoothed_results(smooth_seq, all_joint_ids, smooth_path)
+        save_smoothed_results(
+            smooth_seq,  # type: ignore[arg-type]
+            all_joint_ids,
+            smooth_path,
+        )
         print(f"[saved] {smooth_path}")
         total_people += 1
 
