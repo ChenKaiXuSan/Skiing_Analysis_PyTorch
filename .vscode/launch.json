@@ -81,8 +81,8 @@
       "name": "fuse_unity", 
       "type": "debugpy",
       "request": "launch",
-      "module": "main_unity",
-      "cwd": "/workspace/code/project",
+      "module": "fuse.main_unity",
+      "cwd": "/workspace/code",
       "python": "/opt/conda/envs/sam_3d_body/bin/python",
       "console": "integratedTerminal",
     },
@@ -90,8 +90,8 @@
       "name": "fuse_raw",
       "type": "debugpy",
       "request": "launch",
-      "module": "main_raw",
-      "cwd": "/workspace/code/project",
+      "module": "fuse.main_raw",
+      "cwd": "/workspace/code",
       "python": "/opt/conda/envs/sam_3d_body/bin/python",
       "console": "integratedTerminal",
       "args": []
@@ -102,6 +102,16 @@
       "request": "launch",
       "module": "angle.main",
       "cwd": "/workspace/code/project",
+      "python": "/opt/conda/envs/sam_3d_body/bin/python",
+      "console": "integratedTerminal",
+      "args": []
+    },
+    {
+      "name": "visualize_3d_results",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "vid_3d_kpt.main",
+      "cwd": "/workspace/code",
       "python": "/opt/conda/envs/sam_3d_body/bin/python",
       "console": "integratedTerminal",
       "args": []

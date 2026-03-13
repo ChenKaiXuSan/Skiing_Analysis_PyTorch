@@ -6,33 +6,13 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from confidence import (
+from .confidence import (
     crossview_consistency_confidence,
     weakpersp_reproj_confidence,
 )
-from fuse import fuse_frame_3d, temporal_smooth_ema
-from load_raw import load_raw
-from save import save_smoothed_results
-
-# --- 設定 ---
-UNITY_MHR70_MAPPING = {
-    1: "Bone_Eye_L",
-    2: "Bone_Eye_R",
-    5: "Upperarm_L",
-    6: "Upperarm_R",
-    7: "lowerarm_l",
-    8: "lowerarm_r",
-    9: "Thigh_L",
-    10: "Thigh_R",
-    11: "calf_l",
-    12: "calf_r",
-    13: "Foot_L",
-    14: "Foot_R",
-    41: "Hand_R",
-    62: "Hand_L",
-    69: "neck_01",
-}
-TARGET_IDS = list(UNITY_MHR70_MAPPING.keys())
+from .fuse import fuse_frame_3d, temporal_smooth_ema
+from .load_raw import load_raw
+from .save import save_smoothed_results
 
 IDX_PELVIS = 14
 IDX_LHIP = 11
@@ -116,11 +96,15 @@ def main() -> None:
 
         paths = _resolve_person_paths(person)
         if paths is None:
-            print(f"Skipped person (unsupported format or missing files): {person_name}")
+            print(
+                f"Skipped person (unsupported format or missing files): {person_name}"
+            )
             continue
 
         all_frame_results = load_raw(paths)
+
         fused_seq = []
+        all_joint_ids = None
 
         for frame_idx, frame_data in all_frame_results.items():
             p2d_l_raw = frame_data["L_2D"]["pred"]
@@ -128,6 +112,11 @@ def main() -> None:
             p2d_r_raw = frame_data["R_2D"]["pred"]
             p3d_r_raw = frame_data["R_3D"]["pred"]
 
+            # 获取所有关节点id
+            if all_joint_ids is None:
+                all_joint_ids = sorted(set(p3d_l_raw.keys()) | set(p3d_r_raw.keys()))
+
+            # 计算置信度
             p3d_l_conf1, _, _, _ = weakpersp_reproj_confidence(
                 p3d_l_raw,
                 p2d_l_raw,
@@ -155,12 +144,14 @@ def main() -> None:
             q_l_data = np.sqrt(p3d_l_conf1 * conf2)
             q_r_data = np.sqrt(p3d_r_conf1 * conf2)
 
-            fused_3d = fuse_frame_3d(p3d_l_raw, p3d_r_raw, q_l_data, q_r_data, TARGET_IDS)
+            fused_3d = fuse_frame_3d(
+                p3d_l_raw, p3d_r_raw, q_l_data, q_r_data, all_joint_ids
+            )
             fused_seq.append(fused_3d)
 
         smooth_seq = temporal_smooth_ema(
             fused_seq,
-            TARGET_IDS,
+            all_joint_ids,
             alpha=args.alpha,
             adaptive=args.adaptive_smooth,
             alpha_min=args.smooth_alpha_min,
@@ -170,11 +161,11 @@ def main() -> None:
 
         if args.save_raw_fused:
             raw_path = args.output_root / f"{person_name}_fused.npy"
-            save_smoothed_results(fused_seq, TARGET_IDS, raw_path)
+            save_smoothed_results(fused_seq, all_joint_ids, raw_path)
             print(f"[saved] {raw_path}")
 
         smooth_path = args.output_root / f"{person_name}_smoothed.npy"
-        save_smoothed_results(smooth_seq, TARGET_IDS, smooth_path)
+        save_smoothed_results(smooth_seq, all_joint_ids, smooth_path)
         print(f"[saved] {smooth_path}")
         total_people += 1
 

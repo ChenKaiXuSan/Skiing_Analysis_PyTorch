@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-'''
+"""
 File: /workspace/code/project/fuse.py
 Project: /workspace/code/project
 Created Date: Friday January 30th 2026
@@ -9,7 +9,8 @@ Author: Kaixu Chen
 Comment:
 Have a good code time :)
 -----
-'''
+"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -20,13 +21,21 @@ EPS = 1e-8
 
 # ---------------------------- Side prior ----------------------------
 LEFT_JOINTS = {
-    "Upperarm_L", "lowerarm_l", "Hand_L",
-    "Thigh_L", "calf_l", "Foot_L",
+    "Upperarm_L",
+    "lowerarm_l",
+    "Hand_L",
+    "Thigh_L",
+    "calf_l",
+    "Foot_L",
 }
 
 RIGHT_JOINTS = {
-    "Upperarm_R", "lowerarm_r", "Hand_R",
-    "Thigh_R", "calf_r", "Foot_R",
+    "Upperarm_R",
+    "lowerarm_r",
+    "Hand_R",
+    "Thigh_R",
+    "calf_r",
+    "Foot_R",
 }
 
 
@@ -200,7 +209,7 @@ def q_from_bone_deviation(
             continue
         dev_sum = 0.0
         cnt = 0
-        for (e_i, ja, jb) in inc[j]:
+        for e_i, ja, jb in inc[j]:
             if np.all(np.isfinite(X[ja])) and np.all(np.isfinite(X[jb])):
                 l = np.linalg.norm(X[ja] - X[jb])
                 dev_sum += abs(l - med_lens[e_i])
@@ -289,11 +298,12 @@ def fuse_frame_3d(
     Inputs 3D dict are in SAME coordinate system.
     q_l/q_r: (J,) quality (higher is better).
     """
-    Xl = dict_to_array(p3d_l_dict, target_ids)  # (J,3)
-    Xr = dict_to_array(p3d_r_dict, target_ids)  # (J,3)
-
-    # Xl = p3d_l_dict
-    # Xr = p3d_r_dict
+    if target_ids is None:
+        Xl = p3d_l_dict
+        Xr = p3d_r_dict
+    else:
+        Xl = dict_to_array(p3d_l_dict, target_ids)  # (J,3)
+        Xr = dict_to_array(p3d_r_dict, target_ids)  # (J,3)
 
     ok_l = np.all(np.isfinite(Xl), axis=1)
     ok_r = np.all(np.isfinite(Xr), axis=1)
@@ -302,7 +312,9 @@ def fuse_frame_3d(
 
     fused = np.full_like(Xl, np.nan)
     both = ok_l & ok_r
-    fused[both] = (wl[both, None] * Xl[both] + wr[both, None] * Xr[both]) / (wl[both, None] + wr[both, None] + EPS)
+    fused[both] = (wl[both, None] * Xl[both] + wr[both, None] * Xr[both]) / (
+        wl[both, None] + wr[both, None] + EPS
+    )
 
     only_l = ok_l & ~ok_r
     fused[only_l] = Xl[only_l]
@@ -311,6 +323,7 @@ def fuse_frame_3d(
     fused[only_r] = Xr[only_r]
 
     return array_to_dict(fused, target_ids)
+
 
 # ---------------------------- Temporal smoothing ----------------------------
 def temporal_smooth_ema(
@@ -378,7 +391,9 @@ def temporal_smooth_ema(
                     alpha_max,
                 )
             else:
-                alpha_dyn = np.full((np.count_nonzero(both),), float(alpha), dtype=np.float64)
+                alpha_dyn = np.full(
+                    (np.count_nonzero(both),), float(alpha), dtype=np.float64
+                )
 
             Y[t, both] = (
                 alpha_dyn[:, None] * xt[both]

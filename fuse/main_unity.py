@@ -11,11 +11,11 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-from confidence import crossview_consistency_confidence, weakpersp_reproj_confidence
-from fuse import fuse_frame_3d, temporal_smooth_ema
-from save import save_smoothed_results
+from .confidence import crossview_consistency_confidence, weakpersp_reproj_confidence
+from .fuse import fuse_frame_3d, temporal_smooth_ema
+from .save import save_smoothed_results
 
-
+# Unity的数据是需要过滤的
 UNITY_MHR70_MAPPING = {
     1: "Bone_Eye_L",
     2: "Bone_Eye_R",
@@ -194,7 +194,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input-root",
         type=Path,
-        default=Path("/workspace/data/sam3d_body_results/unity"),
+        default=Path("/workspace/data/dual_view_pose/sam3d_body_results/unity"),
         help="Root folder containing SAM 3D npz outputs.",
     )
     parser.add_argument(
