@@ -69,7 +69,7 @@ python -m vid_3d_kpt.visualize_3d_results \
 - --frame-idx: 要额外保存的单帧索引
 - --max-frames: 限制渲染帧数，适合快速检查
 - --view-layout: simple 为轻量单视角视频模式，multi 为四视角模式
-- --skeleton: auto / mhr70 / unity_mhr70 / unity15 / coco17 / none
+- --skeleton: auto / mhr70 / coco17 / none
 - --center-mode: none / mean / pelvis
 
 说明：
@@ -77,7 +77,7 @@ python -m vid_3d_kpt.visualize_3d_results \
 - 如果 before 和 after 的帧数不同，会自动截断到较短长度。
 - 如果只有一份输入，也可以单独渲染该序列。
 - 该工具默认用 matplotlib 离屏渲染，适合服务器环境。
-- 对于你这批 (T, 15, 3) 的 fused/smoothed 结果，auto 会自动启用 unity15 骨架连线。
+- 对于你这批 (T, 15, 3) 的 fused/smoothed 结果，auto 会尝试使用 COCO17 的骨架连线（如果关节点数量匹配）。
 - 默认使用 simple 轻量布局，更适合长视频；如果你要多视角静态检查，可以显式传 --view-layout multi。
 
 Python import 用法：

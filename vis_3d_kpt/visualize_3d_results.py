@@ -3,16 +3,19 @@
 import argparse
 import shutil
 import numpy as np
-from typing import Any, Optional, Sequence, Iterable
-
-# UNITY15 关节点ID（如有需要可自定义）
-UNITY15_TARGET_IDS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 41, 62, 69]
 from pathlib import Path
+from typing import Any, Optional, Sequence
 
+from .visualization.save_utils import merge_frame_to_video, save_figure
+from .visualization.scene_visualizer import SceneVisualizer
+from .visualization.skeleton_visualizer import SkeletonVisualizer
+from .metadata.mhr70 import pose_info as mhr70_pose_info
+
+NpzFile: Optional[type] = None
 try:
     from numpy import lib
 
-    NpzFile = lib.npyio.NpzFile
+    NpzFile = lib.npyio.NpzFile  # type: ignore[attr-defined]
 except ImportError:
     NpzFile = None
 
@@ -37,23 +40,6 @@ COCO_EDGES = [
     (15, 17),
 ]
 
-UNITY15_BONE_EDGES_BY_ID = [
-    (69, 5),
-    (5, 7),
-    (7, 62),
-    (69, 6),
-    (6, 8),
-    (8, 41),
-    (69, 9),
-    (9, 11),
-    (11, 13),
-    (69, 10),
-    (10, 12),
-    (12, 14),
-    (9, 10),
-    (5, 6),
-]
-
 DEFAULT_VIEWS = [
     ("front_left", -25, 270),
     ("front_right", -25, 90),
@@ -72,6 +58,18 @@ POSE_KEYS = (
     "positions_3d",
     "joints_3d",
 )
+
+
+def setup_visualizer():
+    """Setup visualizers with default pose meta (MHR70)."""
+
+    skeleton_visualizer = SkeletonVisualizer(line_width=2, radius=5)
+    skeleton_visualizer.set_pose_meta(mhr70_pose_info)
+
+    scene_visualizer = SceneVisualizer(line_width=2, radius=5)
+    scene_visualizer.set_pose_meta(mhr70_pose_info)
+
+    return skeleton_visualizer, scene_visualizer
 
 
 def load_pose_sequence(
@@ -94,10 +92,11 @@ def load_pose_sequence(
 
 
 def unwrap_loaded_object(loaded: Any) -> Any:
-    if isinstance(loaded, NpzFile):
-        if len(loaded.files) == 1:
-            return loaded[loaded.files[0]]
-        return {name: loaded[name] for name in loaded.files}
+    if NpzFile is not None and isinstance(loaded, NpzFile):
+        loaded_npz: Any = loaded
+        if len(loaded_npz.files) == 1:
+            return loaded_npz[loaded_npz.files[0]]
+        return {name: loaded_npz[name] for name in loaded_npz.files}
 
     if isinstance(loaded, np.ndarray) and loaded.dtype != object:
         return loaded
@@ -158,10 +157,11 @@ def pick_key_from_object(data: Any, data_key: str) -> Any:
             raise KeyError(f"字段 {data_key} 不存在")
         return data[data_key]
 
-    if isinstance(data, NpzFile):
-        if data_key not in data.files:
+    if NpzFile is not None and isinstance(data, NpzFile):
+        data_npz: Any = data
+        if data_key not in data_npz.files:  # type: ignore[attr-defined]
             raise KeyError(f"字段 {data_key} 不存在")
-        return data[data_key]
+        return data_npz[data_key]  # type: ignore[index]
 
     if hasattr(data, data_key):
         return getattr(data, data_key)
@@ -185,12 +185,13 @@ def stack_pose_frames(frames: Sequence[Any]) -> np.ndarray:
         else:
             raise TypeError(f"不支持的帧类型: {type(frame)!r}")
 
-        pose = np.asarray(pose, dtype=np.float64)
-        if pose.ndim == 3 and pose.shape[0] == 1:
-            pose = pose[0]
-        if pose.ndim != 2 or pose.shape[-1] != 3:
-            raise ValueError(f"单帧 3D 结果必须是 (J,3)，当前为 {pose.shape}")
-        poses.append(pose)
+        assert pose is not None
+        pose_arr = np.asarray(pose, dtype=np.float64)
+        if pose_arr.ndim == 3 and pose_arr.shape[0] == 1:
+            pose_arr = pose_arr[0]
+        if pose_arr.ndim != 2 or pose_arr.shape[-1] != 3:
+            raise ValueError(f"单帧 3D 结果必须是 (J,3)，当前为 {pose_arr.shape}")
+        poses.append(pose_arr)
     return np.stack(poses, axis=0)
 
 
@@ -229,14 +230,18 @@ def get_edges(skeleton: str, num_joints: int) -> list[tuple[int, int]]:
     if skeleton == "none":
         return []
     if skeleton == "coco17":
-        return [(a, b) for a, b in COCO_EDGES if a < num_joints and b < num_joints]
-    if skeleton == "unity15":
-        return get_unity15_edges(num_joints)
+        return [
+            (a, b)
+            for a, b in COCO_EDGES
+            if a < num_joints and b < num_joints
+        ]
     if skeleton == "auto":
-        if num_joints == 15:
-            return get_unity15_edges(num_joints)
         if num_joints == 17:
-            return [(a, b) for a, b in COCO_EDGES if a < num_joints and b < num_joints]
+            return [
+                (a, b)
+                for a, b in COCO_EDGES
+                if a < num_joints and b < num_joints
+            ]
         return []
     raise ValueError(f"未知骨架预设: {skeleton}")
 
@@ -265,23 +270,29 @@ def get_edges_from_pose_info(
     return edges
 
 
-def get_unity15_edges(num_joints: int) -> list[tuple[int, int]]:
-    if num_joints != len(UNITY15_TARGET_IDS):
-        return []
-    id_to_index = {joint_id: index for index, joint_id in enumerate(UNITY15_TARGET_IDS)}
-    edges = []
-    for start_id, end_id in UNITY15_BONE_EDGES_BY_ID:
-        if start_id in id_to_index and end_id in id_to_index:
-            edges.append((id_to_index[start_id], id_to_index[end_id]))
-    return edges
-
-
-def compute_plot_limits(
-    sequences: Iterable[Optional[np.ndarray]],
+def render_comparison_frame(
+    before_pose: Optional[np.ndarray],
+    after_pose: Optional[np.ndarray],
+    edges: list[tuple[int, int]],
     frame_idx: int,
     view_layout: str,
+    skeleton_vis: Optional[Any] = None,
+    scene_vis: Optional[Any] = None,
 ) -> Any:
+    """Render a comparison frame (before vs. after).
+
+    This uses the same `setup_visualizer` / `SceneVisualizer` /
+    `SkeletonVisualizer` setup as the rest of this package.
+    """
+
     import matplotlib.pyplot as plt
+
+    if skeleton_vis is None or scene_vis is None:
+        skeleton_vis, scene_vis = setup_visualizer()
+
+    # Use the requested skeleton topology.
+    skeleton_vis.skeleton = edges
+    scene_vis.skeleton = edges
 
     panels: list[tuple[str, np.ndarray]] = []
     if before_pose is not None:
@@ -289,40 +300,18 @@ def compute_plot_limits(
     if after_pose is not None:
         panels.append(("after", after_pose))
 
-    views = SIMPLE_VIEWS if view_layout == "simple" else DEFAULT_VIEWS
-    show_axes = view_layout != "simple"
+    fig_width = 6 if view_layout == "simple" else 8
+    fig = plt.figure(figsize=(fig_width * max(1, len(panels)), 6))
+    for idx, (name, pose) in enumerate(panels):
+        ax = fig.add_subplot(1, max(1, len(panels)), idx + 1, projection="3d")
+        skeleton_vis.draw_skeleton_3d(
+            ax=ax,
+            points_3d=pose,
+            window_title=f"{name} frame {frame_idx}",
+        )
 
-    fig = plt.figure(figsize=(4.8 * len(views), 4.4 * len(panels)))
-    fig.suptitle(f"3D pose frame {frame_idx:06d}", fontsize=14)
-
-    for row_idx, (row_name, pose) in enumerate(panels):
-        for col_idx, (view_name, elev, azim) in enumerate(views):
-            subplot_idx = row_idx * len(views) + col_idx + 1
-            ax = fig.add_subplot(
-                len(panels),
-                len(views),
-                subplot_idx,
-                projection="3d",
-            )
-            draw_pose(
-                ax=ax,
-                pose=pose,
-                edges=edges,
-                limits=limits,
-                title=f"{row_name} | {view_name}",
-                elev=elev,
-                azim=azim,
-                show_axes=show_axes,
-            )
-
-    fig.subplots_adjust(
-        left=0.03,
-        right=0.98,
-        bottom=0.04,
-        top=0.92,
-        wspace=0.12,
-        hspace=0.18,
-    )
+    fig.suptitle(f"Frame {frame_idx:06d}")
+    fig.tight_layout()
     return fig
 
 
@@ -331,7 +320,11 @@ def save_figure_exact(image: Any, save_path: Path) -> None:
     save_figure(image, save_path)
 
 
-def merge_frame_to_video_exact(save_path: Path, flag: str, fps: int = 30) -> Path:
+def merge_frame_to_video_exact(
+    save_path: Path,
+    flag: str,
+    fps: int = 30,
+) -> Path:
     return merge_frame_to_video(save_path, flag, fps=fps)
 
 
@@ -346,13 +339,19 @@ def visualize_npz(
 ) -> None:
     """加载 .npz/.npy 并使用 SceneVisualizer / SkeletonVisualizer 可视化。
 
-    输出：out_dir/frames/*.png, out_dir/single_frame/frame_*.png, out_dir/video/*.mp4
+    输出：
+    - out_dir/frames/*.png
+    - out_dir/single_frame/frame_*.png
+    - out_dir/video/*.mp4
     """
     import matplotlib.pyplot as plt
 
     seq = load_pose_sequence(npz_path, data_key=data_key)
     if max_frames is not None:
         seq = seq[:max_frames]
+
+    # keep this argument to match the public API; currently unused
+    _ = view_layout
 
     skeleton_vis, scene_vis = setup_visualizer()
 
@@ -475,7 +474,10 @@ def run_visualization(args: argparse.Namespace) -> None:
     ref_seq = after_seq if after_seq is not None else before_seq
     assert ref_seq is not None
     edges = get_edges(args.skeleton, ref_seq.shape[1])
-    limits = compute_plot_limits([before_seq, after_seq])
+
+    skeleton_vis, scene_vis = setup_visualizer()
+    skeleton_vis.skeleton = edges
+    scene_vis.skeleton = edges
 
     video_path = video_dir / resolve_video_name(
         before_exists=before_seq is not None,
@@ -485,12 +487,17 @@ def run_visualization(args: argparse.Namespace) -> None:
 
     for frame_idx in range(num_frames):
         frame_fig = render_comparison_frame(
-            before_pose=(None if before_seq is None else before_seq[frame_idx]),
-            after_pose=None if after_seq is None else after_seq[frame_idx],
+            before_pose=(
+                None if before_seq is None else before_seq[frame_idx]
+            ),
+            after_pose=(
+                None if after_seq is None else after_seq[frame_idx]
+            ),
             edges=edges,
-            limits=limits,
             frame_idx=frame_idx,
             view_layout=args.view_layout,
+            skeleton_vis=skeleton_vis,
+            scene_vis=scene_vis,
         )
 
         frame_path = frames_dir / f"{frame_idx:06d}.png"
@@ -510,7 +517,9 @@ def run_visualization(args: argparse.Namespace) -> None:
         shutil.move(str(merged_path), str(video_path))
 
     if args.frame_idx < 0 or args.frame_idx >= num_frames:
-        raise IndexError(f"frame_idx 超出范围: {args.frame_idx}, 总帧数为 {num_frames}")
+        raise IndexError(
+            f"frame_idx 超出范围: {args.frame_idx}, 总帧数为 {num_frames}"
+        )
 
     print(f"[done] 单帧图片: {single_dir / f'frame_{args.frame_idx:06d}.png'}")
     print(f"[done] 逐帧图片目录: {frames_dir}")

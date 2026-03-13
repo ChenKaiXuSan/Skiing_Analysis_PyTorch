@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input-dir",
         type=Path,
-        default=Path("/workspace/data/dual_view_pose/fused_smoothed_results/person_pairs"),
+        default=Path("/workspace/data/fused_smoothed_results"),
         help="包含 *_fused.npy 和 *_smoothed.npy 的目录",
     )
     parser.add_argument(
@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-frames", type=int, default=None)
     parser.add_argument(
         "--skeleton",
-        choices=("auto", "mhr70", "unity_mhr70", "unity15", "coco17", "none"),
+        choices=("auto", "mhr70", "coco17", "none"),
         default="auto",
     )
     parser.add_argument(
