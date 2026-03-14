@@ -51,9 +51,6 @@ def run_visualization(
     """
     out_dir = out_dir.resolve()
 
-    video_dir = out_dir / "video"
-    video_dir.mkdir(parents=True, exist_ok=True)
-
     (
         left_frames,
         right_frames,
@@ -65,9 +62,17 @@ def run_visualization(
 
     skeleton_visualizer, scene_visualizer = setup_visualizer()
 
-    assert left_frames.shape[0] == right_frames.shape[0], "左右视频帧数不匹配"
+    # * pro的左右视频长度不一致，按最短的来
+    frame_count = min(
+        left_frames.shape[0],
+        right_frames.shape[0],
+        left_2d_kpt.shape[0],
+        right_2d_kpt.shape[0],
+        fused_3d_kpt.shape[0],
+        fused_smoothed_3d_kpt.shape[0],
+    )
 
-    for frame_idx in tqdm(range(left_frames.shape[0]), desc="Processing frames"):
+    for frame_idx in tqdm(range(frame_count), desc="Processing frames"):
         process_frame(
             left_frames=left_frames[frame_idx],
             right_frames=right_frames[frame_idx],
@@ -83,7 +88,14 @@ def run_visualization(
 
     # TODO: 这里合成图片为vidoe
     # merge frmes to video
-    video_path = video_dir / "output.mp4"
+    # video_dir = out_dir / "video"
+    # video_dir.mkdir(parents=True, exist_ok=True)
+
+    # merge_frame_to_video(
+    #     frame_dir=out_dir / "frame_scene",
+    #     output_path=video_dir / f"{person_info.person_name}_frame_scene.mp4",
+    #     fps=30,
+    # )
 
 
 def process_frame(
