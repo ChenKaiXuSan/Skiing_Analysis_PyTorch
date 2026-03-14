@@ -27,14 +27,6 @@ SIMPLE_VIEWS = [
     ("perspective", -20, 255),
 ]
 
-POSE_KEYS = (
-    "pred_keypoints_3d",
-    "keypoints_3d",
-    "pose_3d",
-    "positions_3d",
-    "joints_3d",
-)
-
 
 def setup_visualizer():
     """Setup visualizers with default pose meta (MHR70)."""

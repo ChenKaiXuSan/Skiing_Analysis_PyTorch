@@ -57,7 +57,7 @@ def parse_args() -> argparse.Namespace:
 
 def find_fused_path(
     input_dir: Path, fused_suffix: str, smoothed_suffix: str
-) -> List[Tuple[str, Path, Path]]:
+) -> dict[str, Tuple[Path, Path]]:
     """在 input_dir 下递归查找所有 fused 文件并尝试匹配对应的 smoothed 文件。
 
     返回 (unique_name, fused_path, smoothed_path) 列表，unique_name 用于输出子目录命名。
@@ -84,7 +84,7 @@ def find_fused_path(
     return pairs
 
 
-def find_sam3d_results_dir(sam3d_results_dir: Path) -> Optional[Path]:
+def find_sam3d_results_dir(sam3d_results_dir: Path) -> dict[str, dict[str, Path]]:
     """在 sam3d_results_dir 下查找包含 sam3d 结果的目录（根据文件名特征判断）。
     osmo_2 -> left, osmo_1 -> right
     """
@@ -111,7 +111,7 @@ def find_sam3d_results_dir(sam3d_results_dir: Path) -> Optional[Path]:
     return person_dict
 
 
-def find_video_dir(video_dir: Path) -> Optional[Path]:
+def find_video_dir(video_dir: Path) -> dict[str, dict[str, Path]]:
     """在 video_dir 下查找包含视频文件的目录（根据文件名特征判断）。
     osmo_2 -> left, osmo_1 -> right
     """
@@ -137,36 +137,6 @@ def find_video_dir(video_dir: Path) -> Optional[Path]:
                 )
 
     return res_dict
-
-
-def main() -> None:
-    args = parse_args()
-    out_dir = args.out_dir.resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    person_infos = load_person_infos_from_dirs(
-        video_dir=args.video_dir.resolve(),
-        sam3d_results_dir=args.sam3d_results_dir.resolve(),
-        fused_dir=args.fused_dir.resolve(),
-        fused_suffix=args.suffix_fused,
-        smoothed_suffix=args.suffix_smoothed,
-    )
-
-    for person_name, person_info in person_infos.items():
-        # if "pro" in person_name:
-        #     continue
-
-        logger.info(f"Processing person: {person_name}")
-
-        output_dir = args.out_dir / person_name
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        run_visualization(
-            person_info=person_info,
-            out_dir=output_dir,
-        )
-
-    logger.info("[done] all pairs processed successfully")
 
 
 def load_person_infos_from_dirs(
@@ -204,4 +174,30 @@ def load_person_infos_from_dirs(
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    out_dir = args.out_dir.resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    person_infos = load_person_infos_from_dirs(
+        video_dir=args.video_dir.resolve(),
+        sam3d_results_dir=args.sam3d_results_dir.resolve(),
+        fused_dir=args.fused_dir.resolve(),
+        fused_suffix=args.suffix_fused,
+        smoothed_suffix=args.suffix_smoothed,
+    )
+
+    for person_name, person_info in person_infos.items():
+        # if "pro" in person_name:
+        #     continue
+
+        logger.info(f"Processing person: {person_name}")
+
+        output_dir = args.out_dir / person_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        run_visualization(
+            person_info=person_info,
+            out_dir=output_dir,
+        )
+
+    logger.info("[done] all pairs processed successfully")

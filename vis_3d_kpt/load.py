@@ -22,7 +22,7 @@ Date      	By	Comments
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
@@ -51,38 +51,32 @@ def load_fused_3d_kpt(
 
 
 def load_2d_keypoints(file_path: Path) -> np.ndarray:
-    
+    res_list = []
     if not file_path.exists():
         raise FileNotFoundError(f"文件不存在: {file_path}")
 
     if file_path.is_file() and file_path.suffix in [".npz"]:
-        loaded = np.load(file_path, allow_pickle=True)
-        data = loaded["outputs"]
+        loaded = np.load(file_path, allow_pickle=True)["outputs"]
+
+        for i in loaded:
+            if isinstance(i, dict) and "pred_keypoints_2d" in i:
+                kpts_2d = i["pred_keypoints_2d"]
+                res_list.append(kpts_2d)
+
     elif file_path.is_dir():
-        data = []
-        npz_files = list(file_path.rglob("*.npz"))
+        npz_files = sorted(list(file_path.rglob("*.npz")))
         if not npz_files:
             raise FileNotFoundError(f"目录 {file_path} 中未找到 .npz 文件")
-        if len(npz_files) > 1:
-            raise ValueError(
-                f"目录 {file_path} 中找到多个 .npz 文件，请确保只有一个: {npz_files}"
-            )
+
         for npz_file in npz_files:
             loaded = np.load(npz_file, allow_pickle=True)
-            data.extend(loaded["outputs"])
+            kpts_2d = loaded["outputs"][0]["pred_keypoints_2d"]
+            res_list.append(kpts_2d)
 
     else:
         raise ValueError(f"无法处理的文件路径: {file_path}")
 
-    res_list = []
-
-    for i in data:
-        if isinstance(i, dict) and "pred_keypoints_2d" in i:
-            kpts_2d = i["pred_keypoints_2d"]
-            res_list.append(kpts_2d)
-
     del loaded
-    del data
     return np.asarray(res_list, dtype=np.float64)
 
 
@@ -106,14 +100,7 @@ def load_video_frames(video_path: Path) -> list:
 
 def load_helper(
     person_info: OnePersonInfo,
-) -> Tuple[
-    Optional[np.ndarray],
-    Optional[np.ndarray],
-    Optional[np.ndarray],
-    Optional[np.ndarray],
-    Optional[np.ndarray],
-    Optional[np.ndarray],
-]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     left_frames = load_video_frames(person_info.left_video_path)
     right_frames = load_video_frames(person_info.right_video_path)
     left_2d_kpt = load_2d_keypoints(person_info.left_2d_kpt_path)
