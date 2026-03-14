@@ -110,7 +110,7 @@
       "name": "visualize_3d_results",
       "type": "debugpy",
       "request": "launch",
-      "module": "vid_3d_kpt.main",
+      "module": "vis_3d_kpt.main",
       "cwd": "/workspace/code",
       "python": "/opt/conda/envs/sam_3d_body/bin/python",
       "console": "integratedTerminal",

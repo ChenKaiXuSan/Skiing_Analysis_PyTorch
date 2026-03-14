@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from .visualize_3d_results import run_visualization
+from .visualize import run_visualization
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -24,23 +24,17 @@ def parse_args() -> argparse.Namespace:
         default=Path("/workspace/code/logs/3d_vis_batch"),
         help="批量输出目录",
     )
-    parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--frame-idx", type=int, default=0)
-    parser.add_argument("--max-frames", type=int, default=None)
     parser.add_argument(
-        "--skeleton",
-        choices=("auto", "mhr70", "coco17", "none"),
-        default="auto",
+        "--video-dir",
+        type=Path,
+        default=Path("/workspace/data/dual_view_pose/side_raw_data"),
+        action="store_true",
+        help="遇到单个 pair 处理失败时继续处理剩余 pairs",
     )
     parser.add_argument(
         "--center-mode",
         choices=("none", "mean", "pelvis"),
         default="none",
-    )
-    parser.add_argument(
-        "--view-layout",
-        choices=("simple", "multi"),
-        default="simple",
     )
     parser.add_argument(
         "--suffix-fused",
@@ -53,22 +47,6 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="_smoothed.npy",
         help="平滑结果文件后缀",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=1,
-        help="并行 worker 数（1 表示串行）",
-    )
-    parser.add_argument(
-        "--continue-on-error",
-        action="store_true",
-        help="遇到单个文件出错时继续处理其他文件",
-    )
-    parser.add_argument(
-        "--in-process",
-        action="store_true",
-        help="在当前进程中 import 可视化脚本并直接调用（无需 subprocess）",
     )
     return parser.parse_args()
 
@@ -102,83 +80,60 @@ def find_pairs(
     return pairs
 
 
-def run_pair(
-    name: str, fused_path: Path, smoothed_path: Path, args: argparse.Namespace
-) -> Tuple[str, bool, Optional[str]]:
-    """运行单个 pair，返回 (name, success, errmsg_or_none)"""
-    output_dir = args.out_dir / name
-    output_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        vis_args = argparse.Namespace(
-            before=fused_path,
-            after=smoothed_path,
-            before_key=None,
-            after_key=None,
-            out_dir=output_dir,
-            fps=args.fps,
-            frame_idx=args.frame_idx,
-            max_frames=args.max_frames,
-            skeleton=args.skeleton,
-            center_mode=args.center_mode,
-            video_name=None,
-            view_layout=args.view_layout,
-            npz=None,
-            npz_key=None,
-        )
-        run_visualization(vis_args)
-        return name, True, None
-    except Exception as e:
-        return name, False, str(e)
-
-
 def main() -> None:
     args = parse_args()
     input_dir = args.input_dir.resolve()
     out_dir = args.out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pairs = find_pairs(input_dir, args.suffix_fused, args.suffix_smoothed)
-    if not pairs:
-        raise FileNotFoundError(f"在 {input_dir} 中没有找到 fused/smoothed 配对文件")
+    person_infos = load_person_infos_from_dirs(args.video_dir.resolve(), args.input_dir.resolve(), args.input_dir.resolve(), args.suffix_fused, args.suffix_smoothed)
 
-    print(f"[info] found {len(pairs)} pairs in {input_dir}")
+    print(f"[info] found {len(person_infos)} people in {input_dir}")
 
-    failures: List[Tuple[str, str]] = []
+    for person_info in person_infos:
+        name = person_info.left_video_path.stem if person_info.left_video_path else person_info.right_video_path.stem
+        print(f"[run] {name}")
 
-    if args.workers <= 1:
-        for name, fused_path, smoothed_path in pairs:
-            print(f"[run] {name}")
-            name, ok, err = run_pair(name, fused_path, smoothed_path, args)
-            if not ok:
-                failures.append((name, err or "unknown"))
-                print(f"[error] {name}: {err}")
-                if not args.continue_on_error:
-                    break
-    else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
-            futures = {
-                ex.submit(run_pair, name, fused_path, smoothed_path, args): name
-                for name, fused_path, smoothed_path in pairs
-            }
-            for fut in concurrent.futures.as_completed(futures):
-                name = futures[fut]
-                try:
-                    nm, ok, err = fut.result()
-                    if not ok:
-                        failures.append((nm, err or "unknown"))
-                        print(f"[error] {nm}: {err}")
-                        if not args.continue_on_error:
-                            break
-                except Exception as e:
-                    failures.append((name, str(e)))
-                    print(f"[error] {name}: {e}")
+        output_dir = args.out_dir / name
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    if failures:
-        print(f"[done] completed with {len(failures)} failures")
-        for name, errmsg in failures:
-            print(f" - {name}: {errmsg}")
-    else:
-        print("[done] all pairs processed successfully")
+        run_visualization(
+            person_info=person_info,
+            out_dir=output_dir,
+        )
+            
+
+    print("[done] all pairs processed successfully")
+
+def load_person_infos_from_dirs(
+    video_dir: Path, kpt2d_dir: Path, kpt3d_dir: Path,
+    fused_suffix: str = "_fused.npy", smoothed_suffix: str = "_smoothed.npy"
+) -> List[OnePersonInfo]:
+    """
+    根据三个目录自动组装每个人的 OnePersonInfo。
+    匹配规则：以 3D 结果（kpt3d_dir）为主，按 stem 匹配 2D/视频。
+    """
+    pairs = find_pairs(kpt3d_dir, fused_suffix, smoothed_suffix)
+    person_infos: List[OnePersonInfo] = []
+    for name, fused_path, smoothed_path in pairs:
+        # 取唯一名（去掉 __ 分隔符还原路径）
+        stem = name.split("__")[-1]
+        left_2d = list((kpt2d_dir).rglob(f"{stem}_left_2d.npy"))
+        right_2d = list((kpt2d_dir).rglob(f"{stem}_right_2d.npy"))
+        left_vid = list((video_dir).rglob(f"{stem}_left.mp4"))
+        right_vid = list((video_dir).rglob(f"{stem}_right.mp4"))
+        person_infos.append(
+            OnePersonInfo(
+                left_video_path=left_vid[0] if left_vid else None,
+                right_video_path=right_vid[0] if right_vid else None,
+                left_2d_kpt_path=left_2d[0] if left_2d else None,
+                right_2d_kpt_path=right_2d[0] if right_2d else None,
+                fused_3d_kpt_path=fused_path,
+                fused_smoothed_3d_kpt_path=smoothed_path,
+            )
+        )
+    return person_infos
+
 
 
 if __name__ == "__main__":
