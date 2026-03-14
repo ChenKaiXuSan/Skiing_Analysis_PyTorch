@@ -34,20 +34,6 @@ from matplotlib.gridspec import GridSpec
 
 from .utils import draw_text, parse_pose_metainfo
 
-try:
-    from ..fuse.fuse import TORSO_IDX  # type: ignore
-except Exception:
-    # Fallback torso joints for independent package usage.
-    TORSO_IDX = [69, 9, 10, 5, 6]
-
-# sam 3d body 的关键关节索引（你已经给定）
-# NECK = 69
-# L_HIP, R_HIP = 9, 10
-# L_SHO, R_SHO = 5, 6
-
-# # 用于估计刚体变换的“躯干点”
-# TORSO_IDX = [NECK, L_HIP, R_HIP, L_SHO, R_SHO]
-
 
 class SceneVisualizer:
     def __init__(
@@ -83,117 +69,11 @@ class SceneVisualizer:
         self.link_color = parsed_meta.get("skeleton_link_colors", self.link_color)
         self.skeleton = parsed_meta.get("skeleton_links", self.skeleton)
 
-    # ---------- 计算相机视锥体的 4 个角点 ----------
-    def compute_frustum_points(
-        self, C, forward, up=np.array([0, 1, 0]), fov_deg=60, depth=1.0
-    ):
-        """
-        C       : (3,) 相机中心（世界系）
-        forward : (3,) 相机朝向
-        up      : (3,) 粗略的“向上”方向向量
-        fov_deg : 视野角度（大概给个 60° 即可）
-        depth   : 视锥体长度（看多远）
-        """
-        C = np.asarray(C)
-        forward = np.asarray(forward)
-        forward = forward / (np.linalg.norm(forward) + 1e-8)
-
-        right = np.cross(forward, up)
-        right = right / (np.linalg.norm(right) + 1e-8)
-        up = np.cross(right, forward)
-        up = up / (np.linalg.norm(up) + 1e-8)
-
-        h = depth * np.tan(np.radians(fov_deg) / 2.0)
-
-        p_center = C + forward * depth
-        p1 = p_center + right * h + up * h
-        p2 = p_center - right * h + up * h
-        p3 = p_center - right * h - up * h
-        p4 = p_center + right * h - up * h
-
-        return np.stack([p1, p2, p3, p4], axis=0)  # (4,3)
-
-    # ---------- 在 3D 里画视锥体 ----------
-    def draw_frustum(self, ax, C, frustum_pts, color="r"):
-        C = np.asarray(C)
-        # 相机中心到四个角点
-        for p in frustum_pts:
-            ax.plot([C[0], p[0]], [C[1], p[1]], [C[2], p[2]], color=color)
-
-        # 四个角点围成的四边形
-        idx = [0, 1, 2, 3, 0]
-        for i in range(4):
-            a = frustum_pts[idx[i]]
-            b = frustum_pts[idx[i + 1]]
-            ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]], color=color)
-
-    def draw_camera_axes(self, ax, C, R, length=0.1):
-        # TODO: 现在的R还不知道，只是假设的
-        """
-        在 3D 里画相机坐标系的三个轴
-        C : (3,) 相机中心（世界系）
-        R : (3,3) 相机旋转矩阵（世界系到相机系）
-        length : 轴的长度
-        """
-        C = np.asarray(C)
-        R = np.asarray(R)
-
-        # 相机坐标系的三个轴
-        x_axis = R[:, 0] * length
-        y_axis = R[:, 1] * length
-        z_axis = R[:, 2] * length
-        # 画出三个轴
-        ax.plot(
-            [C[0], C[0] + x_axis[0]],
-            [C[1], C[1] + x_axis[1]],
-            [C[2], C[2] + x_axis[2]],
-            color="r",
-            lw=self.line_width,
-        )
-        ax.plot(
-            [C[0], C[0] + y_axis[0]],
-            [C[1], C[1] + y_axis[1]],
-            [C[2], C[2] + y_axis[2]],
-            color="g",
-            lw=self.line_width,
-        )
-        ax.plot(
-            [C[0], C[0] + z_axis[0]],
-            [C[1], C[1] + z_axis[1]],
-            [C[2], C[2] + z_axis[2]],
-            color="b",
-            lw=self.line_width,
-        )
-
-    def calculate_fov_deg(self, focal_length, image_dimension):
-        """
-        根据焦距和图像尺寸计算视角。
-
-        Args:
-            focal_length (float): 相机的焦距 (像素单位)
-            image_dimension (int): 计算方向上的图像宽度或高度 (像素单位)
-
-        Returns:
-            float: 视角 (度数单位)
-        """
-        # 式: 2 * arctan((Dimension / 2) / focal_length)
-        fov_rad = 2 * np.arctan(image_dimension / (2 * focal_length))
-
-        # ラジアンを度数に変換
-        fov_deg = np.rad2deg(fov_rad)
-
-        return fov_deg
-
     # ---------- 主函数：画人物 + 左右相机 + 视锥体 ----------
     def draw_scene(
         self,
         ax: plt.axes,
         kpts_world,
-        C_L_world,
-        C_R_world,
-        left_focal_length: np.ndarray,
-        right_focal_length: np.ndarray,
-        frustum_depth=0.5,
         elev=-30,
         azim=270,
     ):
@@ -201,8 +81,6 @@ class SceneVisualizer:
         在给定的 ax 上画 3D 场景；如果 ax 为 None，则自己新建 fig+ax。
         """
         kpts_world = np.asarray(kpts_world)
-        C_L_world = np.asarray(C_L_world)
-        C_R_world = np.asarray(C_R_world)
 
         created_fig = None
         if ax is None:
@@ -254,77 +132,6 @@ class SceneVisualizer:
         ax.scatter([0], [0], [0], s=60)
         ax.text(0, 0, 0, "world center (0,0,0)")
 
-        # --- 2. 左相机 ---
-        ax.scatter(
-            C_L_world[0], C_L_world[1], C_L_world[2], marker="^", s=80, color="r"
-        )
-        ax.text(
-            C_L_world[0], C_L_world[1], C_L_world[2], f"Cam L ({C_L_world})", color="r"
-        )
-
-        # 相机看向人物中心
-        valid_torso_idx = [idx for idx in TORSO_IDX if 0 <= idx < kpts_world.shape[0]]
-        if valid_torso_idx:
-            person_center = kpts_world[valid_torso_idx].mean(axis=0)
-        else:
-            person_center = kpts_world.mean(axis=0)
-
-        left_forward = person_center - C_L_world
-        left_forward = left_forward / (np.linalg.norm(left_forward) + 1e-8)
-
-        fov_deg_L = self.calculate_fov_deg(
-            focal_length=left_focal_length, image_dimension=1080
-        )
-        frustum_L = self.compute_frustum_points(
-            C_L_world, forward=left_forward, fov_deg=fov_deg_L, depth=frustum_depth
-        )
-        self.draw_frustum(ax, C_L_world, frustum_L, color="r")
-        self.draw_camera_axes(ax, C_L_world, np.eye(3), length=0.1)
-
-        # --- 3. 右相机 ---
-        ax.scatter(
-            C_R_world[0], C_R_world[1], C_R_world[2], marker="s", s=80, color="b"
-        )
-        ax.text(
-            C_R_world[0],
-            C_R_world[1],
-            C_R_world[2],
-            f"Cam R ({C_R_world})",
-            color="b",
-        )
-
-        # 相机看向人物中心
-
-        right_forward = person_center - C_R_world
-        right_forward = right_forward / (np.linalg.norm(right_forward) + 1e-8)
-
-        fov_deg_R = self.calculate_fov_deg(
-            focal_length=right_focal_length, image_dimension=1080
-        )
-        frustum_R = self.compute_frustum_points(
-            C_R_world, forward=right_forward, fov_deg=fov_deg_R, depth=frustum_depth
-        )
-        self.draw_frustum(ax, C_R_world, frustum_R, color="b")
-        self.draw_camera_axes(ax, C_R_world, np.eye(3), length=0.1)
-
-        # --- 4. 视线连线（可选） ---
-        ax.plot(
-            [C_L_world[0], left_forward[0] + C_L_world[0]],
-            [C_L_world[1], left_forward[1] + C_L_world[1]],
-            [C_L_world[2], left_forward[2] + C_L_world[2]],
-            linestyle="--",
-            color="r",
-            alpha=0.5,
-        )
-        ax.plot(
-            [C_R_world[0], right_forward[0] + C_R_world[0]],
-            [C_R_world[1], right_forward[1] + C_R_world[1]],
-            [C_R_world[2], right_forward[2] + C_R_world[2]],
-            linestyle="--",
-            color="b",
-            alpha=0.5,
-        )
-
         ax.set_xlim3d(-1, 1)
         ax.set_ylim3d(-2, 0)
         ax.set_zlim3d(-5, 5)
@@ -348,10 +155,6 @@ class SceneVisualizer:
         left_frame: np.ndarray,
         right_frame: np.ndarray,
         pose_3d: np.ndarray,  # (J,3)
-        left_focal_length: np.ndarray,
-        right_focal_length: np.ndarray,
-        C_L_world: np.ndarray,
-        C_R_world: np.ndarray,
         frame_num: int = 0,
     ):
         """
@@ -379,10 +182,6 @@ class SceneVisualizer:
         ax_3d_left.set_title("left side view")
         self.draw_scene(
             kpts_world=pose_3d,
-            C_L_world=C_L_world,
-            C_R_world=C_R_world,
-            left_focal_length=left_focal_length,
-            right_focal_length=right_focal_length,
             ax=ax_3d_left,
             elev=-60,
             azim=-90,
@@ -392,10 +191,6 @@ class SceneVisualizer:
         ax_3d_right.set_title("right side view")
         self.draw_scene(
             kpts_world=pose_3d,
-            C_L_world=C_L_world,
-            C_R_world=C_R_world,
-            left_focal_length=left_focal_length,
-            right_focal_length=right_focal_length,
             ax=ax_3d_right,
             elev=130,
             azim=90,
@@ -405,10 +200,6 @@ class SceneVisualizer:
         ax_3d_top_left.set_title("top left view")
         self.draw_scene(
             kpts_world=pose_3d,
-            C_L_world=C_L_world,
-            C_R_world=C_R_world,
-            left_focal_length=left_focal_length,
-            right_focal_length=right_focal_length,
             ax=ax_3d_top_left,
             elev=0,
             azim=-90,
@@ -418,10 +209,6 @@ class SceneVisualizer:
         ax_3d_top_right.set_title("top right view")
         self.draw_scene(
             kpts_world=pose_3d,
-            C_L_world=C_L_world,
-            C_R_world=C_R_world,
-            left_focal_length=left_focal_length,
-            right_focal_length=right_focal_length,
             ax=ax_3d_top_right,
             elev=180,
             azim=90,

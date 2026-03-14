@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from .load import OnePersonInfo
 from .visualize import run_visualization
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -13,7 +17,7 @@ def parse_args() -> argparse.Namespace:
         description="批量可视化 fused/smoothed 3D 结果目录。"
     )
     parser.add_argument(
-        "--input-dir",
+        "--fused-dir",
         type=Path,
         default=Path("/workspace/data/fused_smoothed_results"),
         help="包含 *_fused.npy 和 *_smoothed.npy 的目录",
@@ -28,13 +32,13 @@ def parse_args() -> argparse.Namespace:
         "--video-dir",
         type=Path,
         default=Path("/workspace/data/dual_view_pose/side_raw_data"),
-        action="store_true",
-        help="遇到单个 pair 处理失败时继续处理剩余 pairs",
+        help="视频文件所在目录，程序会尝试根据 3D 结果文件名匹配对应视频（如 xxx_fused.npy 会匹配 xxx_left.mp4 和 xxx_right.mp4）",
     )
     parser.add_argument(
-        "--center-mode",
-        choices=("none", "mean", "pelvis"),
-        default="none",
+        "--sam3d-results-dir",
+        type=Path,
+        default=Path("/workspace/data/dual_view_pose/sam3d_body_results/person"),
+        help="包含 sam3d 结果的目录，程序会尝试根据 3D 结果文件名匹配对应 sam3d 结果（如 xxx_fused.npy 会匹配 xxx_sam3d.npy）",
     )
     parser.add_argument(
         "--suffix-fused",
@@ -51,14 +55,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def find_pairs(
+def find_fused_path(
     input_dir: Path, fused_suffix: str, smoothed_suffix: str
 ) -> List[Tuple[str, Path, Path]]:
     """在 input_dir 下递归查找所有 fused 文件并尝试匹配对应的 smoothed 文件。
 
     返回 (unique_name, fused_path, smoothed_path) 列表，unique_name 用于输出子目录命名。
     """
-    pairs: List[Tuple[str, Path, Path]] = []
+    pairs: dict[str, Tuple[Path, Path]] = {}
     for fused_path in sorted(input_dir.rglob(f"*{fused_suffix}")):
         stem = fused_path.name[: -len(fused_suffix)]
 
@@ -67,7 +71,7 @@ def find_pairs(
         if smoothed_candidate.exists():
             rel = fused_path.relative_to(input_dir)
             unique_name = str((rel.parent / stem).as_posix()).replace("/", "__")
-            pairs.append((unique_name, fused_path, smoothed_candidate))
+            pairs[unique_name] = (fused_path, smoothed_candidate)
             continue
 
         # 否则尝试在整个 tree 中查找同名 smoothed
@@ -75,65 +79,128 @@ def find_pairs(
         if found:
             rel = fused_path.relative_to(input_dir)
             unique_name = str((rel.parent / stem).as_posix()).replace("/", "__")
-            pairs.append((unique_name, fused_path, found[0]))
+            pairs[unique_name] = (fused_path, found[0])
 
     return pairs
 
 
+def find_sam3d_results_dir(sam3d_results_dir: Path) -> Optional[Path]:
+    """在 sam3d_results_dir 下查找包含 sam3d 结果的目录（根据文件名特征判断）。
+    osmo_2 -> left, osmo_1 -> right
+    """
+
+    if not sam3d_results_dir.exists():
+        return None
+
+    person_dict: dict[str, dict[str, Path]] = {}
+
+    for person in sam3d_results_dir.iterdir():
+        person_name = person.stem
+
+        person_dict[person_name] = {"left": None, "right": None}
+        for subdir in person.iterdir():
+            if "left" in subdir.stem or "osmo_2" in subdir.stem:
+                person_dict[person_name]["left"] = subdir
+            elif "right" in subdir.stem or "osmo_1" in subdir.stem:
+                person_dict[person_name]["right"] = subdir
+            else:
+                raise ValueError(
+                    f"无法根据文件名判断 SAM3D 结果视角（left/right），请检查文件名: {subdir}"
+                )
+
+    return person_dict
+
+
+def find_video_dir(video_dir: Path) -> Optional[Path]:
+    """在 video_dir 下查找包含视频文件的目录（根据文件名特征判断）。
+    osmo_2 -> left, osmo_1 -> right
+    """
+    if not video_dir.exists():
+        return None
+
+    res_dict = {}
+
+    for person in video_dir.iterdir():
+        if not person.is_dir():
+            continue
+        for subdir in person.iterdir():
+            person_name = person.name
+            if person_name not in res_dict:
+                res_dict[person_name] = {"left": None, "right": None}
+            if "left" in subdir.stem or "osmo_2" in subdir.stem:
+                res_dict[person_name]["left"] = subdir
+            elif "right" in subdir.stem or "osmo_1" in subdir.stem:
+                res_dict[person_name]["right"] = subdir
+            else:
+                raise ValueError(
+                    f"无法根据文件名判断视频视角（left/right），请检查文件名: {subdir}"
+                )
+
+    return res_dict
+
+
 def main() -> None:
     args = parse_args()
-    input_dir = args.input_dir.resolve()
     out_dir = args.out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    person_infos = load_person_infos_from_dirs(args.video_dir.resolve(), args.input_dir.resolve(), args.input_dir.resolve(), args.suffix_fused, args.suffix_smoothed)
+    person_infos = load_person_infos_from_dirs(
+        video_dir=args.video_dir.resolve(),
+        sam3d_results_dir=args.sam3d_results_dir.resolve(),
+        fused_dir=args.fused_dir.resolve(),
+        fused_suffix=args.suffix_fused,
+        smoothed_suffix=args.suffix_smoothed,
+    )
 
-    print(f"[info] found {len(person_infos)} people in {input_dir}")
+    for person_name, person_info in person_infos.items():
+        # if "pro" in person_name:
+        #     continue
 
-    for person_info in person_infos:
-        name = person_info.left_video_path.stem if person_info.left_video_path else person_info.right_video_path.stem
-        print(f"[run] {name}")
+        logger.info(f"Processing person: {person_name}")
 
-        output_dir = args.out_dir / name
+        output_dir = args.out_dir / person_name
         output_dir.mkdir(parents=True, exist_ok=True)
 
         run_visualization(
             person_info=person_info,
             out_dir=output_dir,
         )
-            
 
-    print("[done] all pairs processed successfully")
+    logger.info("[done] all pairs processed successfully")
+
 
 def load_person_infos_from_dirs(
-    video_dir: Path, kpt2d_dir: Path, kpt3d_dir: Path,
-    fused_suffix: str = "_fused.npy", smoothed_suffix: str = "_smoothed.npy"
+    video_dir: Path,
+    sam3d_results_dir: Path,
+    fused_dir: Path,
+    fused_suffix: str = "_fused.npy",
+    smoothed_suffix: str = "_smoothed.npy",
 ) -> List[OnePersonInfo]:
     """
     根据三个目录自动组装每个人的 OnePersonInfo。
-    匹配规则：以 3D 结果（kpt3d_dir）为主，按 stem 匹配 2D/视频。
+    匹配规则：以 3D 结果（fused_dir）为主，按 stem 匹配 2D/视频。
     """
-    pairs = find_pairs(kpt3d_dir, fused_suffix, smoothed_suffix)
-    person_infos: List[OnePersonInfo] = []
-    for name, fused_path, smoothed_path in pairs:
-        # 取唯一名（去掉 __ 分隔符还原路径）
-        stem = name.split("__")[-1]
-        left_2d = list((kpt2d_dir).rglob(f"{stem}_left_2d.npy"))
-        right_2d = list((kpt2d_dir).rglob(f"{stem}_right_2d.npy"))
-        left_vid = list((video_dir).rglob(f"{stem}_left.mp4"))
-        right_vid = list((video_dir).rglob(f"{stem}_right.mp4"))
-        person_infos.append(
-            OnePersonInfo(
-                left_video_path=left_vid[0] if left_vid else None,
-                right_video_path=right_vid[0] if right_vid else None,
-                left_2d_kpt_path=left_2d[0] if left_2d else None,
-                right_2d_kpt_path=right_2d[0] if right_2d else None,
-                fused_3d_kpt_path=fused_path,
-                fused_smoothed_3d_kpt_path=smoothed_path,
-            )
+    fused_path = find_fused_path(fused_dir, fused_suffix, smoothed_suffix)
+    sam3d_results_dir = find_sam3d_results_dir(sam3d_results_dir)
+    video_dir = find_video_dir(video_dir)
+
+    # find set person name
+    person_names = set(sam3d_results_dir.keys() if sam3d_results_dir else []) | set(
+        video_dir.keys() if video_dir else []
+    )
+
+    person_infos: dict[str, OnePersonInfo] = {}
+    for person_name in sorted(person_names):
+        person_infos[person_name] = OnePersonInfo(
+            person_name=person_name,
+            left_video_path=video_dir[person_name]["left"],
+            right_video_path=video_dir[person_name]["right"],
+            left_2d_kpt_path=sam3d_results_dir[person_name]["left"],
+            right_2d_kpt_path=sam3d_results_dir[person_name]["right"],
+            fused_3d_kpt_path=fused_path[person_name][0],
+            fused_smoothed_3d_kpt_path=fused_path[person_name][1],
         )
     return person_infos
-
 
 
 if __name__ == "__main__":

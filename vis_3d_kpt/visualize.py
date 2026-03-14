@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-import logging
+from tqdm import tqdm
+import numpy as np
 
+from .load import OnePersonInfo, load_helper
+from .metadata.mhr70 import pose_info as mhr70_pose_info
 from .visualization.save_utils import merge_frame_to_video, save_figure
 from .visualization.scene_visualizer import SceneVisualizer
 from .visualization.skeleton_visualizer import SkeletonVisualizer
-from .metadata.mhr70 import pose_info as mhr70_pose_info
-from .load import load_helper, OnePersonInfo
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +59,7 @@ def run_visualization(
     """
     out_dir = out_dir.resolve()
 
-    frames_dir = out_dir / "single_frame"
     video_dir = out_dir / "video"
-
-    frames_dir.mkdir(parents=True, exist_ok=True)
     video_dir.mkdir(parents=True, exist_ok=True)
 
     (
@@ -76,82 +75,72 @@ def run_visualization(
 
     assert left_frames.shape[0] == right_frames.shape[0], "左右视频帧数不匹配"
 
-    for frame_idx in range(left_frames.shape[0]):
-        frame_fig = process_frame(
-            left_frames=left_frames,
-            right_frames=right_frames,
-            left_2d_kpt=left_2d_kpt,
-            right_2d_kpt=right_2d_kpt,
-            fused_3d_kpt=fused_3d_kpt,
-            fused_smoothed_3d_kpt=fused_smoothed_3d_kpt,
+    for frame_idx in tqdm(range(left_frames.shape[0]), desc="Processing frames"):
+        process_frame(
+            left_frames=left_frames[frame_idx],
+            right_frames=right_frames[frame_idx],
+            left_2d_kpt=left_2d_kpt[frame_idx],
+            right_2d_kpt=right_2d_kpt[frame_idx],
+            fused_3d_kpt=fused_3d_kpt[frame_idx],
+            fused_smoothed_3d_kpt=fused_smoothed_3d_kpt[frame_idx],
             frame_idx=frame_idx,
             out_root=out_dir,
             skeleton_visualizer=skeleton_visualizer,
             scene_visualizer=scene_visualizer,
         )
 
+    # TODO: 这里合成图片为vidoe
     # merge frmes to video
     video_path = video_dir / "output.mp4"
 
-    print(f"[done] 逐帧图片目录: {frames_dir}")
-    print(f"[done] 视频: {video_path}")
-
 
 def process_frame(
-    left_frames,
-    right_frames,
-    left_2d_kpt,
-    right_2d_kpt,
-    fused_3d_kpt,
-    fused_smoothed_3d_kpt,
-    frame_idx,
+    left_frames: np.ndarray,
+    right_frames: np.ndarray,
+    left_2d_kpt: np.ndarray,
+    right_2d_kpt: np.ndarray,
+    fused_3d_kpt: np.ndarray,
+    fused_smoothed_3d_kpt: np.ndarray,
+    frame_idx: int,
     out_root: Path,
     skeleton_visualizer: SkeletonVisualizer,
     scene_visualizer: SceneVisualizer,
-):
-    left_frame = left_frames[frame_idx]
-    right_frame = right_frames[frame_idx]
-    left_kpt_2d = left_2d_kpt[frame_idx]["pred_keypoints_2d"]
-    right_kpt_2d = right_2d_kpt[frame_idx]["pred_keypoints_2d"]
-    fused_3d_kpt = fused_3d_kpt[frame_idx] if fused_3d_kpt is not None else None
-    fused_smoothed_3d_kpt = (
-        fused_smoothed_3d_kpt[frame_idx] if fused_smoothed_3d_kpt is not None else None
-    )
-
+) -> None:
     # ---------- 画骨架图 ----------
-    kpts_world = (
-        fused_3d_kpt[frame_idx] if fused_3d_kpt is not None else left_kpt_3d
-    )  # 直接把左视角的人当作世界里的骨架
-
-    _skeleton = skeleton_visualizer.draw_skeleton_3d(ax=None, points_3d=kpts_world)
+    # * 时间优化前的
+    _skeleton = skeleton_visualizer.draw_skeleton_3d(ax=None, points_3d=fused_3d_kpt)
 
     skeleton_visualizer.save(
         image=_skeleton,
         save_path=out_root / "fused" / f"{frame_idx}.png",
     )
 
-    # 画左右frame + scene
+    # * 时间优化后的
+    _skeleton_smoothed = skeleton_visualizer.draw_skeleton_3d(
+        ax=None, points_3d=fused_smoothed_3d_kpt
+    )
+
+    skeleton_visualizer.save(
+        image=_skeleton_smoothed,
+        save_path=out_root / "smoothed" / f"{frame_idx}.png",
+    )
+
+    # 画左右frame + 2D骨架
 
     left_kpt_with_frame = skeleton_visualizer.draw_skeleton(
-        image=left_frame, keypoints=left_kpt_2d
+        image=left_frames, keypoints=left_2d_kpt
     )
     right_kpt_with_frame = skeleton_visualizer.draw_skeleton(
-        image=right_frame, keypoints=right_kpt_2d
+        image=right_frames, keypoints=right_2d_kpt
     )
 
     _frame_scene = scene_visualizer.draw_frame_with_scene(
         left_frame=left_kpt_with_frame,
         right_frame=right_kpt_with_frame,
-        pose_3d=kpts_world,
-        C_L_world=C_L_world,
-        C_R_world=C_R_world,
-        left_focal_length=left_focal_len,
-        right_focal_length=right_focal_len,
+        pose_3d=fused_3d_kpt,
     )
 
     scene_visualizer.save(
         image=_frame_scene,
         save_path=out_root / "frame_scene" / f"{frame_idx}.png",
     )
-
-    return left_frame, right_frame, kpts_world

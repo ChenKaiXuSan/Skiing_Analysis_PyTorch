@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+
 from .confidence import (
     crossview_consistency_confidence,
     weakpersp_reproj_confidence,
@@ -39,16 +40,12 @@ def _resolve_person_paths(person_dir: Path):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Fuse real person SAM3D pairs and save raw+smoothed outputs."
-        )
+        description=("Fuse real person SAM3D pairs and save raw+smoothed outputs.")
     )
     parser.add_argument(
         "--input-root",
         type=Path,
-        default=Path(
-            "/workspace/data/dual_view_pose/sam3d_body_results/person"
-        ),
+        default=Path("/workspace/data/dual_view_pose/sam3d_body_results/person"),
         help="Root folder containing pro_*/run_* person directories.",
     )
     parser.add_argument(
@@ -98,8 +95,8 @@ def main() -> None:
         person_name = person.name
         print(f"Processing person: {person_name}")
 
-        if "pro" in person_name: 
-            continue;
+        # if "pro" in person_name:
+        #     continue;
 
         paths = _resolve_person_paths(person)
         if paths is None:

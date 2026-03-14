@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import imageio
 import imageio.v2 as imageio_v2
 import numpy as np
 from PIL import Image
