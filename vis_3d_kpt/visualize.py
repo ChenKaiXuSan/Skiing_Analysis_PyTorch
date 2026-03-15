@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
 import logging
-import shutil
+import gc
+
 from pathlib import Path
-from typing import Any, Optional, Sequence
 
 from tqdm import tqdm
 import numpy as np
 
 from .load import OnePersonInfo, load_helper
 from .metadata.mhr70 import pose_info as mhr70_pose_info
-from .visualization.save_utils import merge_frame_to_video, save_figure
+from .visualization.save_utils import merge_frame_to_video
 from .visualization.scene_visualizer import SceneVisualizer
 from .visualization.skeleton_visualizer import SkeletonVisualizer
 
@@ -49,53 +49,90 @@ def run_visualization(
     This function contains the core logic originally in `main()` and is
     safe to import and call from other scripts.
     """
-    out_dir = out_dir.resolve()
+    left_frames = None
+    right_frames = None
+    left_2d_kpt = None
+    right_2d_kpt = None
+    fused_3d_kpt = None
+    fused_smoothed_3d_kpt = None
 
-    (
-        left_frames,
-        right_frames,
-        left_2d_kpt,
-        right_2d_kpt,
-        fused_3d_kpt,
-        fused_smoothed_3d_kpt,
-    ) = load_helper(person_info)
-
-    skeleton_visualizer, scene_visualizer = setup_visualizer()
-
-    # * pro的左右视频长度不一致，按最短的来
-    frame_count = min(
-        left_frames.shape[0],
-        right_frames.shape[0],
-        left_2d_kpt.shape[0],
-        right_2d_kpt.shape[0],
-        fused_3d_kpt.shape[0],
-        fused_smoothed_3d_kpt.shape[0],
-    )
-
-    for frame_idx in tqdm(range(frame_count), desc="Processing frames"):
-        process_frame(
-            left_frames=left_frames[frame_idx],
-            right_frames=right_frames[frame_idx],
-            left_2d_kpt=left_2d_kpt[frame_idx],
-            right_2d_kpt=right_2d_kpt[frame_idx],
-            fused_3d_kpt=fused_3d_kpt[frame_idx],
-            fused_smoothed_3d_kpt=fused_smoothed_3d_kpt[frame_idx],
-            frame_idx=frame_idx,
-            out_root=out_dir,
-            skeleton_visualizer=skeleton_visualizer,
-            scene_visualizer=scene_visualizer,
+    try:
+        out_dir = out_dir.resolve()
+        logger.info(
+            "Starting visualization for %s to %s", person_info.person_name, str(out_dir)
         )
 
-    # TODO: 这里合成图片为vidoe
-    # merge frmes to video
-    # video_dir = out_dir / "video"
-    # video_dir.mkdir(parents=True, exist_ok=True)
+        (
+            left_frames,
+            right_frames,
+            left_2d_kpt,
+            right_2d_kpt,
+            fused_3d_kpt,
+            fused_smoothed_3d_kpt,
+        ) = load_helper(person_info, memory_efficient=True)
 
-    # merge_frame_to_video(
-    #     frame_dir=out_dir / "frame_scene",
-    #     output_path=video_dir / f"{person_info.person_name}_frame_scene.mp4",
-    #     fps=30,
-    # )
+        skeleton_visualizer, scene_visualizer = setup_visualizer()
+
+        # * pro的左右视频长度不一致，按最短的来
+        frame_count = min(
+            len(left_frames),
+            len(right_frames),
+            len(left_2d_kpt),
+            len(right_2d_kpt),
+            fused_3d_kpt.shape[0],
+            fused_smoothed_3d_kpt.shape[0],
+        )
+
+        for frame_idx in tqdm(range(frame_count), desc="Processing frames"):
+            # if frame_idx > 50:  # 先只处理前50帧，测试用
+            #     break
+
+            try:
+                process_frame(
+                    left_frames=left_frames[frame_idx],
+                    right_frames=right_frames[frame_idx],
+                    left_2d_kpt=left_2d_kpt[frame_idx],
+                    right_2d_kpt=right_2d_kpt[frame_idx],
+                    fused_3d_kpt=fused_3d_kpt[frame_idx],
+                    fused_smoothed_3d_kpt=fused_smoothed_3d_kpt[frame_idx],
+                    frame_idx=frame_idx,
+                    out_root=out_dir,
+                    skeleton_visualizer=skeleton_visualizer,
+                    scene_visualizer=scene_visualizer,
+                )
+            except Exception as e:
+                logger.error("Error processing frame %d: %s", frame_idx, e)
+                continue
+
+        logger.info("Visualization completed for %s", person_info.person_name)
+
+        # 合成图片为视频
+        merge_frame_to_video(out_dir / "fused", "fused", fps=30)
+        merge_frame_to_video(out_dir / "smoothed", "smoothed", fps=30)
+        merge_frame_to_video(out_dir / "frame_scene", "frame_scene", fps=30)
+
+    except Exception as e:
+        logger.error("Error in visualization: %s", e)
+        raise
+    finally:
+        # 结束之后清理内存
+        try:
+            if left_frames is not None:
+                del left_frames
+            if right_frames is not None:
+                del right_frames
+            if left_2d_kpt is not None:
+                del left_2d_kpt
+            if right_2d_kpt is not None:
+                del right_2d_kpt
+            if fused_3d_kpt is not None:
+                del fused_3d_kpt
+            if fused_smoothed_3d_kpt is not None:
+                del fused_smoothed_3d_kpt
+            gc.collect()
+            logger.info("Memory cleaned up")
+        except Exception:
+            pass
 
 
 def process_frame(
@@ -141,7 +178,7 @@ def process_frame(
     _frame_scene = scene_visualizer.draw_frame_with_scene(
         left_frame=left_kpt_with_frame,
         right_frame=right_kpt_with_frame,
-        pose_3d=fused_3d_kpt,
+        pose_3d=fused_smoothed_3d_kpt,
     )
 
     scene_visualizer.save(

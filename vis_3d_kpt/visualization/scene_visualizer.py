@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
 
-from .utils import draw_text, parse_pose_metainfo
+from .utils import parse_pose_metainfo
 
 
 class SceneVisualizer:
@@ -72,8 +72,8 @@ class SceneVisualizer:
     # ---------- 主函数：画人物 + 左右相机 + 视锥体 ----------
     def draw_scene(
         self,
-        ax: plt.axes,
-        kpts_world,
+        ax: plt.axes = None,
+        kpts_world: np.ndarray = np.array([]),
         elev=-30,
         azim=270,
     ):
@@ -84,7 +84,7 @@ class SceneVisualizer:
 
         created_fig = None
         if ax is None:
-            created_fig = plt.figure(figsize=(15, 15))
+            created_fig = plt.figure(figsize=(8, 8))
             ax = created_fig.add_subplot(111, projection="3d")
 
         # --- 颜色处理 ---
@@ -128,23 +128,23 @@ class SceneVisualizer:
                     alpha=self.alpha,
                 )
 
+        # ax.set_xlim3d(-0.1, 0.1)
+        # ax.set_ylim3d(-1.5, 0)
+        # ax.set_zlim3d(-0.1, 0.1)
+
         # 标记世界坐标系原点
         ax.scatter([0], [0], [0], s=60)
         ax.text(0, 0, 0, "world center (0,0,0)")
 
-        ax.set_xlim3d(-1, 1)
-        ax.set_ylim3d(-2, 0)
-        ax.set_zlim3d(-5, 5)
+        ax.set_xlim3d(-0.5, 0.5)
+        ax.set_zlim3d(0, 1.8)
+        ax.set_ylim3d(-0.5, 0.5)
 
         ax.set_box_aspect((1, 1, 1))
 
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
-
-        # 翻转 Z 轴显示方向
-        # zmin, zmax = ax.get_zlim()
-        # ax.set_zlim(zmax, zmin)
 
         ax.view_init(elev=elev, azim=azim)
 
@@ -161,7 +161,7 @@ class SceneVisualizer:
         渲染一个 frame：左图+右图+3D pose，并返回 figure。
         """
 
-        fig = plt.figure(figsize=(15, 15))
+        fig = plt.figure(figsize=(8, 8))
         fig.suptitle(f"Frame {frame_num}")
         gs = GridSpec(2, 3, figure=fig)
 
@@ -178,13 +178,17 @@ class SceneVisualizer:
         axR.set_title("Right view")
 
         # -------- 3D pose ---------- #
+        # 交换y和z轴，并将z轴取反，使得y轴朝上，z轴朝前（相机看向人物）
+        pose_3d[:, [1, 2]] = pose_3d[:, [2, 1]]
+        pose_3d[:, 2] = -pose_3d[:, 2]
+
         ax_3d_left = fig.add_subplot(gs[0, 1], projection="3d")
         ax_3d_left.set_title("left side view")
         self.draw_scene(
             kpts_world=pose_3d,
             ax=ax_3d_left,
-            elev=-60,
-            azim=-90,
+            elev=0,
+            azim=0,
         )
 
         ax_3d_right = fig.add_subplot(gs[1, 1], projection="3d")
@@ -192,7 +196,7 @@ class SceneVisualizer:
         self.draw_scene(
             kpts_world=pose_3d,
             ax=ax_3d_right,
-            elev=130,
+            elev=0,
             azim=90,
         )
 
@@ -210,8 +214,8 @@ class SceneVisualizer:
         self.draw_scene(
             kpts_world=pose_3d,
             ax=ax_3d_top_right,
-            elev=180,
-            azim=90,
+            elev=90,
+            azim=-180,
         )
 
         fig.tight_layout()
