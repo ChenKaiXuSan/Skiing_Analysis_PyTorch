@@ -136,9 +136,9 @@ class SceneVisualizer:
         ax.scatter([0], [0], [0], s=60)
         ax.text(0, 0, 0, "world center (0,0,0)")
 
-        ax.set_xlim3d(-0.5, 0.5)
+        ax.set_xlim3d(-0.3, 0.3)
         ax.set_zlim3d(0, 1.8)
-        ax.set_ylim3d(-0.5, 0.5)
+        ax.set_ylim3d(-0.3, 0.3)
 
         ax.set_box_aspect((1, 1, 1))
 
@@ -161,7 +161,7 @@ class SceneVisualizer:
         渲染一个 frame：左图+右图+3D pose，并返回 figure。
         """
 
-        fig = plt.figure(figsize=(8, 8))
+        fig = plt.figure(figsize=(10, 10))
         fig.suptitle(f"Frame {frame_num}")
         gs = GridSpec(2, 3, figure=fig)
 
@@ -179,8 +179,8 @@ class SceneVisualizer:
 
         # -------- 3D pose ---------- #
         # 交换y和z轴，并将z轴取反，使得y轴朝上，z轴朝前（相机看向人物）
-        pose_3d[:, [1, 2]] = pose_3d[:, [2, 1]]
-        pose_3d[:, 2] = -pose_3d[:, 2]
+        # pose_3d[:, [1, 2]] = pose_3d[:, [2, 1]]
+        # pose_3d[:, 2] = -pose_3d[:, 2]
 
         ax_3d_left = fig.add_subplot(gs[0, 1], projection="3d")
         ax_3d_left.set_title("left side view")
@@ -197,7 +197,7 @@ class SceneVisualizer:
             kpts_world=pose_3d,
             ax=ax_3d_right,
             elev=0,
-            azim=90,
+            azim=-180,
         )
 
         ax_3d_top_left = fig.add_subplot(gs[0, 2], projection="3d")
@@ -205,8 +205,8 @@ class SceneVisualizer:
         self.draw_scene(
             kpts_world=pose_3d,
             ax=ax_3d_top_left,
-            elev=0,
-            azim=-90,
+            elev=90,
+            azim=0,
         )
 
         ax_3d_top_right = fig.add_subplot(gs[1, 2], projection="3d")

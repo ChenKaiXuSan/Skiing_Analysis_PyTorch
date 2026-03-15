@@ -107,9 +107,9 @@ def run_visualization(
         logger.info("Visualization completed for %s", person_info.person_name)
 
         # 合成图片为视频
-        merge_frame_to_video(out_dir / "fused", "fused", fps=30)
-        merge_frame_to_video(out_dir / "smoothed", "smoothed", fps=30)
-        merge_frame_to_video(out_dir / "frame_scene", "frame_scene", fps=30)
+        merge_frame_to_video(out_dir, "fused", fps=30)
+        merge_frame_to_video(out_dir, "smoothed", fps=30)
+        merge_frame_to_video(out_dir, "frame_scene", fps=30)
 
     except Exception as e:
         logger.error("Error in visualization: %s", e)
@@ -147,6 +147,15 @@ def process_frame(
     skeleton_visualizer: SkeletonVisualizer,
     scene_visualizer: SceneVisualizer,
 ) -> None:
+    # 转变坐标系（SAM的坐标系是右手系，Z轴向前；我们希望的坐标系是Z轴向上）
+    fused_3d_kpt = fused_3d_kpt.copy()
+    fused_3d_kpt[:, [1, 2]] = fused_3d_kpt[:, [2, 1]]  # swap Y and Z
+    fused_3d_kpt[:, 2] *= -1  # invert new Z (old Y) to make it forward-facing
+
+    fused_smoothed_3d_kpt = fused_smoothed_3d_kpt.copy()
+    fused_smoothed_3d_kpt[:, [1, 2]] = fused_smoothed_3d_kpt[:, [2, 1]]  # swap Y and Z
+    fused_smoothed_3d_kpt[:, 2] *= -1  # invert new Z (old Y) to make it forward-facing
+
     # ---------- 画骨架图 ----------
     # * 时间优化前的
     _skeleton = skeleton_visualizer.draw_skeleton_3d(ax=None, points_3d=fused_3d_kpt)

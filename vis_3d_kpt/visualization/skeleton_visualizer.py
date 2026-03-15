@@ -102,7 +102,7 @@ class SkeletonVisualizer:
                         f"({len(self.link_color)}) is larger than "
                         f"that of skeleton links ({len(self.skeleton)})"
                     )
-                
+
                 for sk_id, sk in enumerate(self.skeleton):
                     pos1 = (int(kpts[sk[0], 0]), int(kpts[sk[0], 1]))
                     pos2 = (int(kpts[sk[1], 0]), int(kpts[sk[1], 1]))
@@ -206,7 +206,7 @@ class SkeletonVisualizer:
         """
         # 1. 初始化 3D 绘图
         if ax is None:
-            created_fig = plt.figure(figsize=(8, 8))
+            created_fig = plt.figure(figsize=(10, 10))
             ax = created_fig.add_subplot(111, projection="3d")
 
         ax.set_title(window_title)
@@ -276,11 +276,7 @@ class SkeletonVisualizer:
                     alpha=self.alpha,
                 )
 
-        # 翻转 Z 轴显示方向
-        # zmin, zmax = ax.get_zlim()
-        # ax.set_zlim(zmax, zmin)  # 上下限调换
-
-        ax.view_init(elev=-30, azim=270)
+        # ax.view_init(elev=-30, azim=270)
 
         plt.tight_layout()
 
