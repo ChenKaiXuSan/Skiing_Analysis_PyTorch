@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Tuple
 
 from .load import OnePersonInfo
 from .visualize import run_visualization
@@ -145,7 +145,7 @@ def load_person_infos_from_dirs(
     fused_dir: Path,
     fused_suffix: str = "_fused.npy",
     smoothed_suffix: str = "_smoothed.npy",
-) -> List[OnePersonInfo]:
+) -> dict[str, OnePersonInfo]:
     """
     根据三个目录自动组装每个人的 OnePersonInfo。
     匹配规则：以 3D 结果（fused_dir）为主，按 stem 匹配 2D/视频。
@@ -187,8 +187,8 @@ if __name__ == "__main__":
     )
 
     for person_name, person_info in person_infos.items():
-        # if "pro" in person_name:
-        #     continue
+        if person_name == "pro_1":
+            continue
 
         logger.info(f"Processing person: {person_name}")
 
