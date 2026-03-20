@@ -19,13 +19,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fused-dir",
         type=Path,
-        default=Path("/workspace/data/fused_smoothed_results"),
+        default=Path(
+            "/workspace/data/dual_view_pose/fused_smoothed_results/person_pairs"
+        ),
         help="包含 *_fused.npy 和 *_smoothed.npy 的目录",
     )
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=Path("/workspace/code/logs/3d_vis_batch"),
+        default=Path("/workspace/data/dual_view_pose/3d_vis_batch"),
         help="批量输出目录",
     )
     parser.add_argument(
@@ -187,9 +189,6 @@ if __name__ == "__main__":
     )
 
     for person_name, person_info in person_infos.items():
-        if person_name == "pro_1":
-            continue
-
         logger.info(f"Processing person: {person_name}")
 
         output_dir = args.out_dir / person_name
