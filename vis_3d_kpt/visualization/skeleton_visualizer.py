@@ -276,7 +276,7 @@ class SkeletonVisualizer:
                     alpha=self.alpha,
                 )
 
-        # ax.view_init(elev=-30, azim=270)
+        ax.view_init(elev=30, azim=200)
 
         plt.tight_layout()
 

@@ -177,18 +177,13 @@ class SceneVisualizer:
         axR.axis("off")
         axR.set_title("Right view")
 
-        # -------- 3D pose ---------- #
-        # 交换y和z轴，并将z轴取反，使得y轴朝上，z轴朝前（相机看向人物）
-        # pose_3d[:, [1, 2]] = pose_3d[:, [2, 1]]
-        # pose_3d[:, 2] = -pose_3d[:, 2]
-
         ax_3d_left = fig.add_subplot(gs[0, 1], projection="3d")
         ax_3d_left.set_title("left side view")
         self.draw_scene(
             kpts_world=pose_3d,
             ax=ax_3d_left,
             elev=0,
-            azim=0,
+            azim=-180,
         )
 
         ax_3d_right = fig.add_subplot(gs[1, 1], projection="3d")
@@ -197,7 +192,7 @@ class SceneVisualizer:
             kpts_world=pose_3d,
             ax=ax_3d_right,
             elev=0,
-            azim=-180,
+            azim=0,
         )
 
         ax_3d_top_left = fig.add_subplot(gs[0, 2], projection="3d")
@@ -205,8 +200,8 @@ class SceneVisualizer:
         self.draw_scene(
             kpts_world=pose_3d,
             ax=ax_3d_top_left,
-            elev=90,
-            azim=0,
+            elev=-180,
+            azim=90,
         )
 
         ax_3d_top_right = fig.add_subplot(gs[1, 2], projection="3d")
@@ -215,7 +210,7 @@ class SceneVisualizer:
             kpts_world=pose_3d,
             ax=ax_3d_top_right,
             elev=90,
-            azim=-180,
+            azim=0,
         )
 
         fig.tight_layout()

@@ -156,6 +156,14 @@ def process_frame(
     fused_smoothed_3d_kpt[:, [1, 2]] = fused_smoothed_3d_kpt[:, [2, 1]]  # swap Y and Z
     fused_smoothed_3d_kpt[:, 2] *= -1  # invert new Z (old Y) to make it forward-facing
 
+    person_name = out_root.parent.name
+    if person_name.startswith("pro"):
+        # pro数据需要再额外绕y轴旋转180度，使得人物朝向一致
+        fused_3d_kpt[:, 0] *= -1  # invert X and Z for pro
+        fused_3d_kpt[:, 1] *= -1  # invert Z for pro
+        fused_smoothed_3d_kpt[:, 0] *= -1  # invert X and Z for pro
+        fused_smoothed_3d_kpt[:, 1] *= -1  # invert Z for pro
+
     # ---------- 画骨架图 ----------
     # * 时间优化前的
     _skeleton = skeleton_visualizer.draw_skeleton_3d(ax=None, points_3d=fused_3d_kpt)
