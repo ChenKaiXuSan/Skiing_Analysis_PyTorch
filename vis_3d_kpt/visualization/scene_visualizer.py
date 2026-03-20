@@ -155,14 +155,12 @@ class SceneVisualizer:
         left_frame: np.ndarray,
         right_frame: np.ndarray,
         pose_3d: np.ndarray,  # (J,3)
-        frame_num: int = 0,
     ):
         """
         渲染一个 frame：左图+右图+3D pose，并返回 figure。
         """
 
         fig = plt.figure(figsize=(10, 10))
-        fig.suptitle(f"Frame {frame_num}")
         gs = GridSpec(2, 3, figure=fig)
 
         # -------- 左视角 ---------- #
@@ -200,8 +198,8 @@ class SceneVisualizer:
         self.draw_scene(
             kpts_world=pose_3d,
             ax=ax_3d_top_left,
-            elev=-180,
-            azim=90,
+            elev=90,
+            azim=-180,
         )
 
         ax_3d_top_right = fig.add_subplot(gs[1, 2], projection="3d")

@@ -16,17 +16,6 @@ from .visualization.skeleton_visualizer import SkeletonVisualizer
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_VIEWS = [
-    ("front_left", -25, 270),
-    ("front_right", -25, 90),
-    ("top", 85, 270),
-    ("side", 0, 0),
-]
-
-SIMPLE_VIEWS = [
-    ("perspective", -20, 255),
-]
-
 
 def setup_visualizer():
     """Setup visualizers with default pose meta (MHR70)."""
@@ -150,19 +139,23 @@ def process_frame(
     # 转变坐标系（SAM的坐标系是右手系，Z轴向前；我们希望的坐标系是Z轴向上）
     fused_3d_kpt = fused_3d_kpt.copy()
     fused_3d_kpt[:, [1, 2]] = fused_3d_kpt[:, [2, 1]]  # swap Y and Z
-    fused_3d_kpt[:, 2] *= -1  # invert new Z (old Y) to make it forward-facing
+    fused_3d_kpt[:, 2] = -fused_3d_kpt[
+        :, 2
+    ]  # invert new Z (old Y) to make it forward-facing
 
     fused_smoothed_3d_kpt = fused_smoothed_3d_kpt.copy()
     fused_smoothed_3d_kpt[:, [1, 2]] = fused_smoothed_3d_kpt[:, [2, 1]]  # swap Y and Z
-    fused_smoothed_3d_kpt[:, 2] *= -1  # invert new Z (old Y) to make it forward-facing
+    fused_smoothed_3d_kpt[:, 2] = -fused_smoothed_3d_kpt[
+        :, 2
+    ]  # invert new Z (old Y) to make it forward-facing
 
-    person_name = out_root.parent.name
-    if person_name.startswith("pro"):
+    person_name = out_root.name
+    if "pro" in person_name.lower():
         # pro数据需要再额外绕y轴旋转180度，使得人物朝向一致
-        fused_3d_kpt[:, 0] *= -1  # invert X and Z for pro
-        fused_3d_kpt[:, 1] *= -1  # invert Z for pro
-        fused_smoothed_3d_kpt[:, 0] *= -1  # invert X and Z for pro
-        fused_smoothed_3d_kpt[:, 1] *= -1  # invert Z for pro
+        fused_3d_kpt[:, 0] = -fused_3d_kpt[:, 0]  # invert X for pro
+        fused_3d_kpt[:, 1] = -fused_3d_kpt[:, 1]  # invert Y for pro
+        fused_smoothed_3d_kpt[:, 0] = -fused_smoothed_3d_kpt[:, 0]  # invert X for pro
+        fused_smoothed_3d_kpt[:, 1] = -fused_smoothed_3d_kpt[:, 1]  # invert Y for pro
 
     # ---------- 画骨架图 ----------
     # * 时间优化前的
