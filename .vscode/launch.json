@@ -114,7 +114,9 @@
       "cwd": "/workspace/code",
       "python": "/opt/conda/envs/sam_3d_body/bin/python",
       "console": "integratedTerminal",
-      "args": []
+      "args": [
+        "--mode=prefusion",
+      ]
     }
   ]
 }

@@ -4,12 +4,19 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 from .load import OnePersonInfo
-from .visualize import run_visualization
+from .visualize import (
+    load_prefusion_shared_inputs,
+    run_prefusion_visualization,
+    run_visualization,
+)
 
 logger = logging.getLogger(__name__)
+
+SideDirMap = dict[str, Optional[Path]]
+PersonSideMap = dict[str, SideDirMap]
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,7 +27,7 @@ def parse_args() -> argparse.Namespace:
         "--fused-dir",
         type=Path,
         default=Path(
-            "/workspace/data/dual_view_pose/fused_smoothed_results/person_pairs"
+            "/workspace/data/dual_view_pose/fused_smoothed_results"
         ),
         help="包含 *_fused.npy 和 *_smoothed.npy 的目录",
     )
@@ -34,13 +41,19 @@ def parse_args() -> argparse.Namespace:
         "--video-dir",
         type=Path,
         default=Path("/workspace/data/dual_view_pose/side_raw_data"),
-        help="视频文件所在目录，程序会尝试根据 3D 结果文件名匹配对应视频（如 xxx_fused.npy 会匹配 xxx_left.mp4 和 xxx_right.mp4）",
+        help=(
+            "视频文件所在目录，程序会尝试根据 3D 结果文件名匹配对应视频"
+            "（如 xxx_fused.npy 会匹配 xxx_left.mp4 和 xxx_right.mp4）"
+        ),
     )
     parser.add_argument(
         "--sam3d-results-dir",
         type=Path,
         default=Path("/workspace/data/dual_view_pose/sam3d_body_results/person"),
-        help="包含 sam3d 结果的目录，程序会尝试根据 3D 结果文件名匹配对应 sam3d 结果（如 xxx_fused.npy 会匹配 xxx_sam3d.npy）",
+        help=(
+            "包含 sam3d 结果的目录，程序会尝试根据 3D 结果文件名匹配"
+            "对应 sam3d 结果（如 xxx_fused.npy 会匹配 xxx_sam3d.npy）"
+        ),
     )
     parser.add_argument(
         "--suffix-fused",
@@ -53,6 +66,23 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="_smoothed.npy",
         help="平滑结果文件后缀",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["fused", "prefusion", "all"],
+        default="all",
+        help=(
+            "可视化模式：fused=仅融合后，prefusion=仅融合前(left/right)，"
+            "all=两者都可视化"
+        ),
+    )
+    parser.add_argument(
+        "--prefusion-sides",
+        type=str,
+        choices=["left", "right", "both"],
+        default="both",
+        help="融合前可视化时选择视角",
     )
     return parser.parse_args()
 
@@ -72,7 +102,8 @@ def find_fused_path(
         smoothed_candidate = fused_path.with_name(f"{stem}{smoothed_suffix}")
         if smoothed_candidate.exists():
             rel = fused_path.relative_to(input_dir)
-            unique_name = str((rel.parent / stem).as_posix()).replace("/", "__")
+            unique_name = str((rel.parent / stem).as_posix())
+            unique_name = unique_name.replace("/", "__")
             pairs[unique_name] = (fused_path, smoothed_candidate)
             continue
 
@@ -80,13 +111,16 @@ def find_fused_path(
         found = list(input_dir.rglob(f"{stem}{smoothed_suffix}"))
         if found:
             rel = fused_path.relative_to(input_dir)
-            unique_name = str((rel.parent / stem).as_posix()).replace("/", "__")
+            unique_name = str((rel.parent / stem).as_posix())
+            unique_name = unique_name.replace("/", "__")
             pairs[unique_name] = (fused_path, found[0])
 
     return pairs
 
 
-def find_sam3d_results_dir(sam3d_results_dir: Path) -> dict[str, dict[str, Path]]:
+def find_sam3d_results_dir(
+    sam3d_results_dir: Path,
+) -> Optional[PersonSideMap]:
     """在 sam3d_results_dir 下查找包含 sam3d 结果的目录（根据文件名特征判断）。
     osmo_2 -> left, osmo_1 -> right
     """
@@ -94,17 +128,17 @@ def find_sam3d_results_dir(sam3d_results_dir: Path) -> dict[str, dict[str, Path]
     if not sam3d_results_dir.exists():
         return None
 
-    person_dict: dict[str, dict[str, Path]] = {}
+    person_dict: PersonSideMap = {}
 
     for person in sam3d_results_dir.iterdir():
-        person_name = person.stem
+        sam_person_name = person.stem
 
-        person_dict[person_name] = {"left": None, "right": None}
+        person_dict[sam_person_name] = {"left": None, "right": None}
         for subdir in person.iterdir():
             if "left" in subdir.stem or "osmo_2" in subdir.stem:
-                person_dict[person_name]["left"] = subdir
+                person_dict[sam_person_name]["left"] = subdir
             elif "right" in subdir.stem or "osmo_1" in subdir.stem:
-                person_dict[person_name]["right"] = subdir
+                person_dict[sam_person_name]["right"] = subdir
             else:
                 raise ValueError(
                     f"无法根据文件名判断 SAM3D 结果视角（left/right），请检查文件名: {subdir}"
@@ -113,26 +147,26 @@ def find_sam3d_results_dir(sam3d_results_dir: Path) -> dict[str, dict[str, Path]
     return person_dict
 
 
-def find_video_dir(video_dir: Path) -> dict[str, dict[str, Path]]:
+def find_video_dir(video_dir: Path) -> Optional[PersonSideMap]:
     """在 video_dir 下查找包含视频文件的目录（根据文件名特征判断）。
     osmo_2 -> left, osmo_1 -> right
     """
     if not video_dir.exists():
         return None
 
-    res_dict = {}
+    res_dict: PersonSideMap = {}
 
     for person in video_dir.iterdir():
         if not person.is_dir():
             continue
         for subdir in person.iterdir():
-            person_name = person.name
-            if person_name not in res_dict:
-                res_dict[person_name] = {"left": None, "right": None}
+            video_person_name = person.name
+            if video_person_name not in res_dict:
+                res_dict[video_person_name] = {"left": None, "right": None}
             if "left" in subdir.stem or "osmo_2" in subdir.stem:
-                res_dict[person_name]["left"] = subdir
+                res_dict[video_person_name]["left"] = subdir
             elif "right" in subdir.stem or "osmo_1" in subdir.stem:
-                res_dict[person_name]["right"] = subdir
+                res_dict[video_person_name]["right"] = subdir
             else:
                 raise ValueError(
                     f"无法根据文件名判断视频视角（left/right），请检查文件名: {subdir}"
@@ -141,38 +175,69 @@ def find_video_dir(video_dir: Path) -> dict[str, dict[str, Path]]:
     return res_dict
 
 
-def load_person_infos_from_dirs(
+def build_person_infos(
     video_dir: Path,
     sam3d_results_dir: Path,
     fused_dir: Path,
     fused_suffix: str = "_fused.npy",
     smoothed_suffix: str = "_smoothed.npy",
 ) -> dict[str, OnePersonInfo]:
-    """
-    根据三个目录自动组装每个人的 OnePersonInfo。
-    匹配规则：以 3D 结果（fused_dir）为主，按 stem 匹配 2D/视频。
-    """
-    fused_path = find_fused_path(fused_dir, fused_suffix, smoothed_suffix)
-    sam3d_results_dir = find_sam3d_results_dir(sam3d_results_dir)
-    video_dir = find_video_dir(video_dir)
+    """统一构建 person_info，包含 left/right 及可选 fused/smoothed 路径。"""
+    sam3d_dir_map = find_sam3d_results_dir(sam3d_results_dir)
+    video_dir_map = find_video_dir(video_dir)
 
-    # find set person name
-    person_names = set(sam3d_results_dir.keys() if sam3d_results_dir else []) | set(
-        video_dir.keys() if video_dir else []
+    if not sam3d_dir_map:
+        raise FileNotFoundError(
+            "SAM3D results dir not found or empty: "
+            f"{sam3d_results_dir.resolve()}"
+        )
+    if not video_dir_map:
+        raise FileNotFoundError(
+            f"Video dir not found or empty: {video_dir.resolve()}"
+        )
+
+    fused_pairs: dict[str, Tuple[Path, Path]] = {}
+    if fused_dir.exists():
+        fused_pairs = find_fused_path(fused_dir, fused_suffix, smoothed_suffix)
+
+    person_names = sorted(
+        set(sam3d_dir_map.keys()) & set(video_dir_map.keys())
     )
 
-    person_infos: dict[str, OnePersonInfo] = {}
-    for person_name in sorted(person_names):
-        person_infos[person_name] = OnePersonInfo(
-            person_name=person_name,
-            left_video_path=video_dir[person_name]["left"],
-            right_video_path=video_dir[person_name]["right"],
-            left_2d_kpt_path=sam3d_results_dir[person_name]["left"],
-            right_2d_kpt_path=sam3d_results_dir[person_name]["right"],
-            fused_3d_kpt_path=fused_path[person_name][0],
-            fused_smoothed_3d_kpt_path=fused_path[person_name][1],
+    infos: dict[str, OnePersonInfo] = {}
+    for info_person_name in person_names:
+        left_video_path = video_dir_map[info_person_name]["left"]
+        right_video_path = video_dir_map[info_person_name]["right"]
+        left_2d_kpt_path = sam3d_dir_map[info_person_name]["left"]
+        right_2d_kpt_path = sam3d_dir_map[info_person_name]["right"]
+
+        if (
+            left_video_path is None
+            or right_video_path is None
+            or left_2d_kpt_path is None
+            or right_2d_kpt_path is None
+        ):
+            logger.warning(
+                "Skip %s: missing left/right inputs",
+                info_person_name,
+            )
+            continue
+
+        info = OnePersonInfo(
+            person_name=info_person_name,
+            left_video_path=left_video_path,
+            right_video_path=right_video_path,
+            left_2d_kpt_path=left_2d_kpt_path,
+            right_2d_kpt_path=right_2d_kpt_path,
         )
-    return person_infos
+
+        if info_person_name in fused_pairs:
+            info.fused_3d_kpt_path = fused_pairs[info_person_name][0]
+            info.fused_smoothed_3d_kpt_path = fused_pairs[info_person_name][1]
+
+        infos[info_person_name] = info
+
+    return infos
 
 
 if __name__ == "__main__":
@@ -180,7 +245,7 @@ if __name__ == "__main__":
     out_dir = args.out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    person_infos = load_person_infos_from_dirs(
+    person_infos = build_person_infos(
         video_dir=args.video_dir.resolve(),
         sam3d_results_dir=args.sam3d_results_dir.resolve(),
         fused_dir=args.fused_dir.resolve(),
@@ -188,15 +253,49 @@ if __name__ == "__main__":
         smoothed_suffix=args.suffix_smoothed,
     )
 
+    selected_sides = (
+        ["left", "right"]
+        if args.prefusion_sides == "both"
+        else [args.prefusion_sides]
+    )
+
     for person_name, person_info in person_infos.items():
-        logger.info(f"Processing person: {person_name}")
+        if args.mode in {"fused", "all"}:
+            if (
+                not person_info.fused_3d_kpt_path.is_file()
+                or not person_info.fused_smoothed_3d_kpt_path.is_file()
+            ):
+                logger.warning(
+                    "Skip %s: missing fused/smoothed paths",
+                    person_name,
+                )
+            else:
+                logger.info("Processing fused/smoothed: %s", person_name)
+                fused_out_dir = args.out_dir / person_name / "fused"
+                fused_out_dir.mkdir(parents=True, exist_ok=True)
 
-        output_dir = args.out_dir / person_name
-        output_dir.mkdir(parents=True, exist_ok=True)
+                run_visualization(
+                    person_info=person_info,
+                    out_dir=fused_out_dir,
+                )
 
-        run_visualization(
-            person_info=person_info,
-            out_dir=output_dir,
-        )
+        if args.mode in {"prefusion", "all"}:
+            logger.info("Processing prefusion person: %s", person_name)
+            shared_inputs = load_prefusion_shared_inputs(person_info)
+
+            for pref_side in selected_sides:
+                prefusion_out_dir = args.out_dir / person_name / pref_side
+                prefusion_out_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(
+                    "Processing prefusion: %s-%s",
+                    person_name,
+                    pref_side,
+                )
+                run_prefusion_visualization(
+                    person_info=person_info,
+                    side=pref_side,
+                    out_dir=prefusion_out_dir,
+                    shared_inputs=shared_inputs,
+                )
 
     logger.info("[done] all pairs processed successfully")

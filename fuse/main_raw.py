@@ -4,6 +4,7 @@
 
 import argparse
 from pathlib import Path
+from typing import Iterable
 
 import numpy as np
 
@@ -20,6 +21,76 @@ IDX_LHIP = 11
 IDX_RHIP = 12
 IDX_LSHO = 5
 IDX_RSHO = 6
+
+
+def _dict_to_array(
+    p3d_dict: dict[int, Iterable[float]],
+    joint_ids: list[int],
+) -> np.ndarray:
+    arr = np.full((len(joint_ids), 3), np.nan, dtype=np.float64)
+    for i, jid in enumerate(joint_ids):
+        if jid in p3d_dict:
+            arr[i] = np.asarray(p3d_dict[jid], dtype=np.float64)
+    return arr
+
+
+def _array_to_dict(
+    arr: np.ndarray,
+    joint_ids: list[int],
+) -> dict[int, Iterable[float]]:
+    out = {}
+    for i, jid in enumerate(joint_ids):
+        if np.all(np.isfinite(arr[i])):
+            out[jid] = arr[i].copy()
+    return out
+
+
+def _kabsch_rigid_align(
+    src: np.ndarray,
+    dst: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Find R,t that maps src -> dst with rigid transform (no scaling)."""
+    src_mean = src.mean(axis=0)
+    dst_mean = dst.mean(axis=0)
+    src_centered = src - src_mean
+    dst_centered = dst - dst_mean
+
+    h_mat = src_centered.T @ dst_centered
+    u_mat, _, vt_mat = np.linalg.svd(h_mat)
+    rot = vt_mat.T @ u_mat.T
+
+    # Avoid reflection: enforce det(R)=+1
+    if np.linalg.det(rot) < 0:
+        vt_mat[-1, :] *= -1
+        rot = vt_mat.T @ u_mat.T
+
+    trans = dst_mean - (rot @ src_mean)
+    return rot, trans
+
+
+def _align_right_to_left(
+    p3d_l_dict: dict[int, Iterable[float]],
+    p3d_r_dict: dict[int, Iterable[float]],
+    joint_ids: list[int],
+) -> dict[int, Iterable[float]]:
+    """Align right-view 3D to left-view coordinates via rigid transform."""
+    x_left = _dict_to_array(p3d_l_dict, joint_ids)
+    x_right = _dict_to_array(p3d_r_dict, joint_ids)
+
+    valid = np.all(np.isfinite(x_left), axis=1) & np.all(
+        np.isfinite(x_right),
+        axis=1,
+    )
+    if int(valid.sum()) < 3:
+        return p3d_r_dict
+
+    rot, trans = _kabsch_rigid_align(x_right[valid], x_left[valid])
+    x_right_aligned = np.full_like(x_right, np.nan)
+    x_right_aligned[valid] = (rot @ x_right[valid].T).T + trans
+
+    # Keep original values for joints missing in either view.
+    x_right_aligned[~valid] = x_right[~valid]
+    return _array_to_dict(x_right_aligned, joint_ids)
 
 
 def _resolve_person_paths(person_dir: Path):
@@ -40,18 +111,22 @@ def _resolve_person_paths(person_dir: Path):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=("Fuse real person SAM3D pairs and save raw+smoothed outputs.")
+        description=(
+            "Fuse real person SAM3D pairs and save raw+smoothed outputs."
+        )
     )
     parser.add_argument(
         "--input-root",
         type=Path,
-        default=Path("/workspace/data/dual_view_pose/sam3d_body_results/person"),
+        default=Path(
+            "/workspace/data/dual_view_pose/sam3d_body_results/person"
+        ),
         help="Root folder containing pro_*/run_* person directories.",
     )
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("/workspace/data/fused_smoothed_results"),
+        default=Path("/workspace/data/dual_view_pose/fused_smoothed_results"),
         help="Output folder for fused results.",
     )
     parser.add_argument("--sigma-px", type=float, default=12.0)
@@ -120,6 +195,11 @@ def main() -> None:
             p3d_l_raw = frame_data["L_3D"]["pred"]
             p2d_r_raw = frame_data["R_2D"]["pred"]
             p3d_r_raw = frame_data["R_3D"]["pred"]
+            p3d_r_aligned = _align_right_to_left(
+                p3d_l_raw,
+                p3d_r_raw,
+                all_joint_ids,
+            )
 
             # 计算置信度
             p3d_l_conf1, _, _, _ = weakpersp_reproj_confidence(
@@ -150,7 +230,11 @@ def main() -> None:
             q_r_data = np.sqrt(p3d_r_conf1 * conf2)
 
             fused_3d = fuse_frame_3d(
-                p3d_l_raw, p3d_r_raw, q_l_data, q_r_data, all_joint_ids
+                p3d_l_raw,
+                p3d_r_aligned,
+                q_l_data,
+                q_r_data,
+                all_joint_ids,
             )
             fused_seq.append(fused_3d)
 
