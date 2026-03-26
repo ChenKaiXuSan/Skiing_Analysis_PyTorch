@@ -128,17 +128,13 @@ class SceneVisualizer:
                     alpha=self.alpha,
                 )
 
-        # ax.set_xlim3d(-0.1, 0.1)
-        # ax.set_ylim3d(-1.5, 0)
-        # ax.set_zlim3d(-0.1, 0.1)
-
         # 标记世界坐标系原点
         ax.scatter([0], [0], [0], s=60)
         ax.text(0, 0, 0, "world center (0,0,0)")
 
-        ax.set_xlim3d(-0.3, 0.3)
+        ax.set_xlim3d(-0.5, 0.5)
         ax.set_zlim3d(0, 1.8)
-        ax.set_ylim3d(-0.3, 0.3)
+        ax.set_ylim3d(-0.5, 0.5)
 
         ax.set_box_aspect((1, 1, 1))
 
@@ -181,7 +177,7 @@ class SceneVisualizer:
             kpts_world=pose_3d,
             ax=ax_3d_left,
             elev=0,
-            azim=-180,
+            azim=-90,
         )
 
         ax_3d_right = fig.add_subplot(gs[1, 1], projection="3d")
@@ -190,7 +186,7 @@ class SceneVisualizer:
             kpts_world=pose_3d,
             ax=ax_3d_right,
             elev=0,
-            azim=0,
+            azim=90,
         )
 
         ax_3d_top_left = fig.add_subplot(gs[0, 2], projection="3d")
@@ -199,7 +195,7 @@ class SceneVisualizer:
             kpts_world=pose_3d,
             ax=ax_3d_top_left,
             elev=90,
-            azim=-180,
+            azim=-90,
         )
 
         ax_3d_top_right = fig.add_subplot(gs[1, 2], projection="3d")
@@ -208,7 +204,7 @@ class SceneVisualizer:
             kpts_world=pose_3d,
             ax=ax_3d_top_right,
             elev=90,
-            azim=0,
+            azim=90,
         )
 
         fig.tight_layout()

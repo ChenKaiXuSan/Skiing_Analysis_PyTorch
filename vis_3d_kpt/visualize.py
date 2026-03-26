@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 
-import logging
 import gc
-
+import logging
 from pathlib import Path
 from typing import Iterator
 
-from tqdm import tqdm
 import numpy as np
+from tqdm import tqdm
 
 from .load import (
     OnePersonInfo,
@@ -139,32 +138,37 @@ def run_visualization(
 
 def _transform_points_for_vis(
     points_3d: np.ndarray,
-    person_name: str,
 ) -> np.ndarray:
-    """Align coordinate system with fused visualization for fair comparison."""
+    """SAM的坐标系是右手系，Z轴向前；我们希望的坐标系是Z轴向上"""
+
     pts = points_3d.copy()
     pts[:, [1, 2]] = pts[:, [2, 1]]
     pts[:, 2] = -pts[:, 2]
-
-    if "pro" in person_name.lower():
-        pts[:, 0] = -pts[:, 0]
-        pts[:, 1] = -pts[:, 1]
 
     return pts
 
 
 def _iter_prefusion_3d(side_dir: Path) -> Iterator[np.ndarray]:
-    for npz_file in sorted(side_dir.rglob("*.npz")):
+    if side_dir.is_file() and side_dir.suffix == ".npz":
+        npz_files = [side_dir]
+    elif side_dir.is_dir():
+        npz_files = sorted(side_dir.rglob("*.npz"))
+    else:
+        npz_files = []
+
+    for npz_file in npz_files:
         with np.load(npz_file, allow_pickle=True) as loaded:
             outputs = loaded["outputs"]
-            if len(outputs) == 0:
+            output_items = np.asarray(outputs, dtype=object).ravel()
+            if len(output_items) == 0:
                 continue
 
-            first = outputs[0]
-            if not isinstance(first, dict) or "pred_keypoints_3d" not in first:
-                continue
-
-            yield first["pred_keypoints_3d"]
+            for item in output_items:
+                if not isinstance(item, dict):
+                    continue
+                if "pred_keypoints_3d" not in item:
+                    continue
+                yield item["pred_keypoints_3d"]
 
 
 def load_prefusion_shared_inputs(
@@ -246,7 +250,6 @@ def run_prefusion_visualization(
 
             points_3d = _transform_points_for_vis(
                 prefusion_3d[frame_idx],
-                person_name,
             )
 
             skeleton = skeleton_visualizer.draw_skeleton_3d(
@@ -255,17 +258,7 @@ def run_prefusion_visualization(
             )
             skeleton_visualizer.save(
                 image=skeleton,
-                save_path=out_dir / "fused" / f"{frame_idx}.png",
-            )
-
-            # prefusion 没有 smoothed，复用同一帧，保证输出结构对齐。
-            skeleton_smoothed = skeleton_visualizer.draw_skeleton_3d(
-                ax=None,
-                points_3d=points_3d,
-            )
-            skeleton_visualizer.save(
-                image=skeleton_smoothed,
-                save_path=out_dir / "smoothed" / f"{frame_idx}.png",
+                save_path=out_dir / "3d" / f"{frame_idx}.png",
             )
 
             left_kpt_with_frame = skeleton_visualizer.draw_skeleton(
@@ -296,8 +289,7 @@ def run_prefusion_visualization(
             )
             return
 
-        merge_frame_to_video(out_dir, "fused", fps=30)
-        merge_frame_to_video(out_dir, "smoothed", fps=30)
+        merge_frame_to_video(out_dir, "3d", fps=30)
         merge_frame_to_video(out_dir, "frame_scene", fps=30)
 
         logger.info(
@@ -340,25 +332,8 @@ def process_frame(
     scene_visualizer: SceneVisualizer,
 ) -> None:
     # 转变坐标系（SAM的坐标系是右手系，Z轴向前；我们希望的坐标系是Z轴向上）
-    fused_3d_kpt = fused_3d_kpt.copy()
-    fused_3d_kpt[:, [1, 2]] = fused_3d_kpt[:, [2, 1]]  # swap Y and Z
-    fused_3d_kpt[:, 2] = -fused_3d_kpt[
-        :, 2
-    ]  # invert new Z (old Y) to make it forward-facing
-
-    fused_smoothed_3d_kpt = fused_smoothed_3d_kpt.copy()
-    fused_smoothed_3d_kpt[:, [1, 2]] = fused_smoothed_3d_kpt[:, [2, 1]]  # swap Y and Z
-    fused_smoothed_3d_kpt[:, 2] = -fused_smoothed_3d_kpt[
-        :, 2
-    ]  # invert new Z (old Y) to make it forward-facing
-
-    person_name = out_root.name
-    if "pro" in person_name.lower():
-        # pro数据需要再额外绕y轴旋转180度，使得人物朝向一致
-        fused_3d_kpt[:, 0] = -fused_3d_kpt[:, 0]  # invert X for pro
-        fused_3d_kpt[:, 1] = -fused_3d_kpt[:, 1]  # invert Y for pro
-        fused_smoothed_3d_kpt[:, 0] = -fused_smoothed_3d_kpt[:, 0]  # invert X for pro
-        fused_smoothed_3d_kpt[:, 1] = -fused_smoothed_3d_kpt[:, 1]  # invert Y for pro
+    fused_3d_kpt = _transform_points_for_vis(fused_3d_kpt)
+    fused_smoothed_3d_kpt = _transform_points_for_vis(fused_smoothed_3d_kpt)
 
     # ---------- 画骨架图 ----------
     # * 时间优化前的

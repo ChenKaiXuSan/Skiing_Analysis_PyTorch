@@ -99,8 +99,9 @@ def _resolve_person_paths(person_dir: Path):
         sam_l_path = person_dir / "left"
         sam_r_path = person_dir / "right"
     elif person_name.startswith("run"):
-        sam_l_path = person_dir / "osmo_1_sam_3d_body_outputs.npz"
-        sam_r_path = person_dir / "osmo_2_sam_3d_body_outputs.npz"
+        # osmo_1 > right, osmo_2 > left
+        sam_l_path = person_dir / "osmo_2_sam_3d_body_outputs.npz"
+        sam_r_path = person_dir / "osmo_1_sam_3d_body_outputs.npz"
     else:
         return None
 
@@ -170,8 +171,8 @@ def main() -> None:
         person_name = person.name
         print(f"Processing person: {person_name}")
 
-        # if "pro" in person_name:
-        #     continue;
+        if "pro" in person_name:
+            continue;
 
         paths = _resolve_person_paths(person)
         if paths is None:

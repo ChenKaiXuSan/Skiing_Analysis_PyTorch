@@ -1,12 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-import os
 from typing import Dict, Optional, Union
 
 import cv2
 import numpy as np
-# from detectron2.config import LazyConfig
-# from omegaconf import OmegaConf
 
 
 def draw_text(
@@ -59,46 +56,6 @@ def draw_text(
     return cv2.putText(
         image, texts, (x, y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness - 1
     )
-
-
-def draw_box(
-    img,
-    bbox=[],
-    text="",
-    box_color=(0, 255, 0),
-    text_color=(0, 255, 0),
-    font_scale=0.7,
-    font_thickness=1,
-):
-    # BOX_MODE is XYXY_ABS for cv2.rectangle.
-    pt1 = (int(bbox[0]), int(bbox[1]))
-    pt2 = (int(bbox[2]), int(bbox[3]))
-    img = cv2.rectangle(
-        img,
-        pt1,
-        pt2,
-        box_color,
-        2,
-    )
-    if text:
-        y, dy = int(bbox[1]) + 30, 30
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
-        text_origin = (pt1[0] + 2, pt1[1] + text_size[1] + 2)
-        for line in text.split("\n"):
-            img = cv2.putText(
-                img,
-                str(line),
-                text_origin,
-                cv2.FONT_HERSHEY_SIMPLEX,
-                font_scale,  # FontScale.
-                text_color,  # Color.
-                font_thickness,  # Thickness.
-                cv2.LINE_AA,
-            )
-            y += dy
-
-    return img
 
 
 def parse_pose_metainfo(metainfo: Union[str, Dict]):
@@ -183,12 +140,7 @@ def parse_pose_metainfo(metainfo: Union[str, Dict]):
             ``"joint_weights"`` in the input
         - "sigmas" (numpy.ndarray): Same as the ``"sigmas"`` in the input
     """
-
-    # if type(metainfo) == str:
-    #     if not os.path.isfile(metainfo):
-    #         raise ValueError("Invalid metainfo file path: ", metainfo)
-    #     metainfo = OmegaConf.to_container(LazyConfig.load(metainfo).pose_info)
-
+    
     # check data integrity
     assert "pose_format" in metainfo
     assert "keypoint_info" in metainfo
