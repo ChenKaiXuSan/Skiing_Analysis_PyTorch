@@ -1,87 +1,164 @@
-<div align="center">    
- 
 # Skiing Motion Analysis
 
-<!-- [![Paper](http://img.shields.io/badge/paper-arxiv.1001.2234-B31B1B.svg)](https://www.nature.com/articles/nature14539)
-[![Conference](http://img.shields.io/badge/NeurIPS-2019-4b44ce.svg)](https://papers.nips.cc/book/advances-in-neural-information-processing-systems-31-2018)
-[![Conference](http://img.shields.io/badge/ICLR-2019-4b44ce.svg)](https://papers.nips.cc/book/advances-in-neural-information-processing-systems-31-2018)
-[![Conference](http://img.shields.io/badge/AnyConference-year-4b44ce.svg)](https://papers.nips.cc/book/advances-in-neural-information-processing-systems-31-2018) -->
+This repository contains a research-oriented pipeline for skiing motion
+analysis from monocular and dual-view videos. It focuses on 3D human pose
+estimation, multi-view reconstruction, pose fusion, temporal smoothing,
+biomechanical angle analysis, and visualization.
 
-<!--
-ARXIV
-[![Paper](http://img.shields.io/badge/arxiv-math.co:1480.1111-B31B1B.svg)](https://www.nature.com/articles/nature14539)
--->
+The codebase is organized as an experimental computer vision system rather than
+a single packaged application. Most entry points are Hydra-based module scripts
+that read configuration from `configs/`.
 
-<!--
-Conference
--->
-</div>
- 
-## Description   
-This repository is a research-oriented deep learning framework for skiing motion analysis, focusing on video-based 3D pose estimation, multi-view reconstruction, and biomechanical performance evaluation.
+## What This Project Does
 
-The project is built on PyTorch Lightning and designed for sports engineering and computer vision research, enabling scalable experimentation on complex skiing movements captured from monocular or multi-camera videos.
+The main goal is to reconstruct and analyze skier motion from video. The
+pipeline supports several complementary reconstruction routes:
 
-Our goal is to quantitatively analyze skiing techniques by modeling:
+- Preprocess raw videos into intermediate `.pt` files with detections, 2D
+  keypoints, bounding boxes, depth, optical flow, and video metadata.
+- Estimate 3D body pose with SAM3D Body in MHR70 format.
+- Estimate 3D pose with VideoPose3D from 2D keypoint sequences.
+- Reconstruct camera/depth/3D information with VGGT.
+- Triangulate 3D joints from synchronized two-view 2D keypoints.
+- Fuse left/right 3D pose estimates using confidence and cross-view
+  consistency.
+- Smooth fused sequences over time.
+- Compute skiing-oriented kinematic metrics such as knee angles, hip angles,
+  torso tilt, torso-knee angle, left/right knee difference, and elbow distance
+  from the body midline.
+- Generate visualizations and evaluation outputs for analysis.
 
-- Full-body 3D kinematics
-- Temporal motion patterns
-- Inter-joint coordination and stability
-- Athlete-specific movement characteristics
+## Pipeline Overview
 
-## How to run
+```text
+raw skiing videos
+  -> prepare_dataset
+  -> SAM3D Body / VideoPose3D / VGGT / triangulation
+  -> multi-view alignment, fusion, or bundle adjustment
+  -> temporal smoothing
+  -> angle analysis, metrics, and visualization
+```
 
-First, install dependencies
+Typical data artifacts include:
+
+- `.pt`: preprocessed video records with frames and detection outputs.
+- `.npz`: model inference outputs such as SAM3D Body or VGGT results.
+- `.npy`: fused or smoothed 3D keypoint sequences.
+- `.csv` and `.png`: angle-analysis tables and plots.
+
+## Main Modules
+
+| Path | Purpose |
+| --- | --- |
+| `prepare_dataset/` | Preprocess raw videos with YOLO, Detectron2, depth estimation, optical flow, tracking, and metadata export. |
+| `prepare_side_results/` | Run SAM3D Body on video data and save 2D/3D body predictions. |
+| `prepare_front_results/` | Prepare front-view results and includes SAM3-related utilities. |
+| `triangulation/` | Reconstruct 3D joints from two-view 2D keypoints and camera parameters. |
+| `VideoPose3D/` | Run VideoPose3D and fuse left/right COCO17 pose estimates. |
+| `vggt/` | Run VGGT-based single-view or multi-view reconstruction. |
+| `fuse/` | Fuse two SAM3D Body pose streams with rigid alignment, confidence weighting, and EMA smoothing. |
+| `bundle_adjustment/` | Match multi-modal subject data and refine pose/camera estimates with geometric constraints. |
+| `angle/` | Compute skiing motion metrics from 3D MHR70 keypoints. |
+| `metrics/` | Compare predicted results with Unity or ground-truth data. |
+| `vis_3d_kpt/` | Visualize 3D keypoint sequences and skeletons. |
+| `analysis/` | Research notebooks for experiments and plotting. |
+
+## Installation
+
+Create a Python environment with PyTorch and install the project dependencies:
 
 ```bash
-# clone project
-git clone [url]
-
-# install project
-cd deep-learning-project-template
-pip install -e .
 pip install -r requirements.txt
 ```
 
-Next, navigate to any file and run it.
+Some modules require additional model checkpoints and external packages. Common
+checkpoint paths are configured under `configs/`, for example:
+
+- YOLO checkpoints in `configs/prepare_dataset.yaml`
+- SAM3D Body checkpoints in `configs/sam3d_body.yaml`
+- VGGT and VideoPose3D paths in `configs/vggt.yaml` and
+  `configs/videopose3d.yaml`
+
+The default configs currently assume a `/workspace/data` and `/workspace/code`
+layout. Update the relevant YAML files before running on a different machine.
+
+## Common Commands
+
+Run commands from the repository root. Most scripts should be launched with
+`python -m` so Hydra resolves module imports and config paths correctly.
+
+Preprocess raw videos:
 
 ```bash
-# module folder
-cd project
-
-# run module (example: mnist as your main contribution)
-python lit_classifier_main.py
+python -m prepare_dataset.main
 ```
 
-## Project Organization
+Run SAM3D Body inference:
 
-```txt
-├── README.md          <- The top-level README for developers using this project.
-├── data
-│   ├── external       <- Data from third party sources.
-│   ├── interim        <- Intermediate data that has been transformed.
-│   ├── processed      <- The final, canonical data sets for modeling.
-│   └── raw            <- The original, immutable data dump.
-│
-├── docs               <- A default Sphinx project; see sphinx-doc.org for details
-│
-├── models             <- Trained and serialized models, model predictions, or model summaries
-│
-├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-│                         the creator's initials, and a short `-` delimited description, e.g.
-│                         `1.0-jqp-initial-data-exploration`.
-│
-├── project            <- Source code for use in this project.
-│   ├── __init__.py    <- Makes project a Python module
+```bash
+python -m prepare_side_results.main
 ```
 
-### Citation
+Run VideoPose3D:
 
+```bash
+python -m VideoPose3D.main
 ```
-@article{YourName,
-  title={Your Title},
-  author={Your team},
-  journal={Location},
-  year={Year}
-}
+
+Run VGGT processing:
+
+```bash
+python -m vggt.main
 ```
+
+Run two-view triangulation:
+
+```bash
+python -m triangulation.main
+```
+
+Fuse SAM3D Body left/right results:
+
+```bash
+python -m fuse.main_raw \
+  --input-root /workspace/data/dual_view_pose/sam3d_body_results/person \
+  --output-root /workspace/data/dual_view_pose/fused_smoothed_results
+```
+
+Run angle analysis:
+
+```bash
+python -m angle.main
+```
+
+## Configuration
+
+The main Hydra configs are:
+
+- `configs/prepare_dataset.yaml`
+- `configs/sam3d_body.yaml`
+- `configs/vggt.yaml`
+- `configs/triangulation.yaml`
+- `configs/videopose3d.yaml`
+- `configs/fuse.yaml`
+- `configs/front_side.yaml`
+- `configs/qwen_image_edit.yaml`
+
+Use these files to set input/output paths, model checkpoints, GPU IDs,
+visualization options, and optimization parameters.
+
+## Notes
+
+- This repository is under active research development, so some modules are
+  experimental and may contain hard-coded assumptions about view names,
+  subject-folder layout, or camera calibration.
+- Left/right view ordering is module-dependent. Check the corresponding
+  `main.py` before preparing new data.
+- Large checkpoints, datasets, and generated logs are not expected to live in
+  the Git repository.
+- A more detailed process description is available in
+  `doc/process_documentation.md`.
+
+## License
+
+See `LICENSE`.
