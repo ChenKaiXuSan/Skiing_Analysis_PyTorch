@@ -1,0 +1,15 @@
+method,mean_mpjpe,std_mpjpe,median_mpjpe,improvement_vs_best_single_pct,improvement_vs_unweighted_pct
+Left single-view,0.794983,0.444630,0.625640,0.000,-6.361
+Right single-view,0.849810,0.496988,0.682264,-6.897,-13.696
+Best single-view (oracle frame),0.769241,0.441040,0.606273,3.238,-2.917
+Unweighted average fusion,0.747441,0.486957,0.571170,5.980,0.000
+Two-view median fusion,0.747441,0.486957,0.571170,5.980,0.000
+Confidence best-view selection,0.834166,0.463537,0.671002,-4.929,-11.603
+2D confidence only,0.748022,0.487120,0.571178,5.907,-0.078
+3D consistency only,0.747441,0.486957,0.571170,5.980,0.000
+2D x 3D multiplicative (recomputed),0.747422,0.486923,0.571170,5.983,0.003
+2D + 3D additive (recomputed),0.747723,0.487040,0.571174,5.945,-0.038
+Proposed confidence-guided fusion (saved raw),0.513083,0.583041,0.288579,35.460,31.355
+Proposed fusion + smoothing (saved),0.513038,0.582972,0.288129,35.466,31.361
+"2D x 3D multiplicative (0.5x sigma, recomputed)",0.747438,0.486958,0.571170,5.981,0.000
+"2D x 3D multiplicative (2.0x sigma, recomputed)",0.746961,0.486094,0.571139,6.041,0.064

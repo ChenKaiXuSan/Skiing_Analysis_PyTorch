@@ -131,3 +131,7 @@ MNIST
 logs/
 ckpt/
 chessboard/
+
+# Paper submission packages are local artifacts by default.
+paper_*/
+archive/paper_packages/

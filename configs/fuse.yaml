@@ -28,4 +28,4 @@ visualize:
   save_3d_keypoints: true
   save_together: true
 
-log_path: logs/front_side/${now:%Y-%m-%d}/${now:%H-%M-%S}
+log_path: logs/fuse/${now:%Y-%m-%d}/${now:%H-%M-%S}

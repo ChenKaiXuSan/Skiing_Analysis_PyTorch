@@ -17,9 +17,6 @@ pipeline supports several complementary reconstruction routes:
 - Preprocess raw videos into intermediate `.pt` files with detections, 2D
   keypoints, bounding boxes, depth, optical flow, and video metadata.
 - Estimate 3D body pose with SAM3D Body in MHR70 format.
-- Estimate 3D pose with VideoPose3D from 2D keypoint sequences.
-- Reconstruct camera/depth/3D information with VGGT.
-- Triangulate 3D joints from synchronized two-view 2D keypoints.
 - Fuse left/right 3D pose estimates using confidence and cross-view
   consistency.
 - Smooth fused sequences over time.
@@ -33,8 +30,8 @@ pipeline supports several complementary reconstruction routes:
 ```text
 raw skiing videos
   -> prepare_dataset
-  -> SAM3D Body / VideoPose3D / VGGT / triangulation
-  -> multi-view alignment, fusion, or bundle adjustment
+  -> SAM3D Body
+  -> dual-view alignment, fusion, and smoothing
   -> temporal smoothing
   -> angle analysis, metrics, and visualization
 ```
@@ -42,7 +39,7 @@ raw skiing videos
 Typical data artifacts include:
 
 - `.pt`: preprocessed video records with frames and detection outputs.
-- `.npz`: model inference outputs such as SAM3D Body or VGGT results.
+- `.npz`: model inference outputs such as SAM3D Body results.
 - `.npy`: fused or smoothed 3D keypoint sequences.
 - `.csv` and `.png`: angle-analysis tables and plots.
 
@@ -52,12 +49,7 @@ Typical data artifacts include:
 | --- | --- |
 | `prepare_dataset/` | Preprocess raw videos with YOLO, Detectron2, depth estimation, optical flow, tracking, and metadata export. |
 | `prepare_side_results/` | Run SAM3D Body on video data and save 2D/3D body predictions. |
-| `prepare_front_results/` | Prepare front-view results and includes SAM3-related utilities. |
-| `triangulation/` | Reconstruct 3D joints from two-view 2D keypoints and camera parameters. |
-| `VideoPose3D/` | Run VideoPose3D and fuse left/right COCO17 pose estimates. |
-| `vggt/` | Run VGGT-based single-view or multi-view reconstruction. |
 | `fuse/` | Fuse two SAM3D Body pose streams with rigid alignment, confidence weighting, and EMA smoothing. |
-| `bundle_adjustment/` | Match multi-modal subject data and refine pose/camera estimates with geometric constraints. |
 | `angle/` | Compute skiing motion metrics from 3D MHR70 keypoints. |
 | `metrics/` | Compare predicted results with Unity or ground-truth data. |
 | `vis_3d_kpt/` | Visualize 3D keypoint sequences and skeletons. |
@@ -76,8 +68,6 @@ checkpoint paths are configured under `configs/`, for example:
 
 - YOLO checkpoints in `configs/prepare_dataset.yaml`
 - SAM3D Body checkpoints in `configs/sam3d_body.yaml`
-- VGGT and VideoPose3D paths in `configs/vggt.yaml` and
-  `configs/videopose3d.yaml`
 
 The default configs currently assume a `/workspace/data` and `/workspace/code`
 layout. Update the relevant YAML files before running on a different machine.
@@ -97,24 +87,6 @@ Run SAM3D Body inference:
 
 ```bash
 python -m prepare_side_results.main
-```
-
-Run VideoPose3D:
-
-```bash
-python -m VideoPose3D.main
-```
-
-Run VGGT processing:
-
-```bash
-python -m vggt.main
-```
-
-Run two-view triangulation:
-
-```bash
-python -m triangulation.main
 ```
 
 Fuse SAM3D Body left/right results:
@@ -137,11 +109,7 @@ The main Hydra configs are:
 
 - `configs/prepare_dataset.yaml`
 - `configs/sam3d_body.yaml`
-- `configs/vggt.yaml`
-- `configs/triangulation.yaml`
-- `configs/videopose3d.yaml`
 - `configs/fuse.yaml`
-- `configs/front_side.yaml`
 - `configs/qwen_image_edit.yaml`
 
 Use these files to set input/output paths, model checkpoints, GPU IDs,
@@ -158,6 +126,8 @@ visualization options, and optimization parameters.
   the Git repository.
 - A more detailed process description is available in
   `doc/process_documentation.md`.
+- A practical project inventory and cleanup guide is available in
+  `docs/project_inventory.md`.
 
 ## License
 

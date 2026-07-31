@@ -1,0 +1,14 @@
+comparison,mean_delta,median_delta,ci_low,ci_high,p_value,holm_p,cohen_dz
+Left single-view - Proposed confidence-guided fusion (saved raw),0.28189955,0.33197235,0.27053661,0.29296355,4.99975e-05,0.0006499675,1.8928636
+Right single-view - Proposed confidence-guided fusion (saved raw),0.3367265,0.37906755,0.32724213,0.34602551,4.99975e-05,0.0006499675,2.733336
+Best single-view (oracle frame) - Proposed confidence-guided fusion (saved raw),0.25615761,0.32021902,0.2446179,0.26770555,4.99975e-05,0.0006499675,1.6861938
+Unweighted average fusion - Proposed confidence-guided fusion (saved raw),0.23435757,0.27694637,0.22587533,0.24279981,4.99975e-05,0.0006499675,2.1142819
+Two-view median fusion - Proposed confidence-guided fusion (saved raw),0.23435757,0.27694637,0.22587533,0.24279981,4.99975e-05,0.0006499675,2.1142819
+Confidence best-view selection - Proposed confidence-guided fusion (saved raw),0.32108269,0.36648883,0.31071574,0.33157489,4.99975e-05,0.0006499675,2.3349341
+2D confidence only - Proposed confidence-guided fusion (saved raw),0.23493857,0.27709848,0.22646079,0.24344945,4.99975e-05,0.0006499675,2.1193436
+3D consistency only - Proposed confidence-guided fusion (saved raw),0.23435757,0.27694637,0.22587533,0.24279981,4.99975e-05,0.0006499675,2.1142819
+2D x 3D multiplicative (recomputed) - Proposed confidence-guided fusion (saved raw),0.23433813,0.27694358,0.22585251,0.24279686,4.99975e-05,0.0006499675,2.1132638
+2D + 3D additive (recomputed) - Proposed confidence-guided fusion (saved raw),0.23463917,0.27709668,0.22617695,0.24312353,4.99975e-05,0.0006499675,2.1168771
+Proposed fusion + smoothing (saved) - Proposed confidence-guided fusion (saved raw),-4.5440699e-05,3.9645412e-05,-0.00014558109,5.5982136e-05,0.36718164,0.36718164,-0.034124831
+"2D x 3D multiplicative (0.5x sigma, recomputed) - Proposed confidence-guided fusion (saved raw)",0.23435501,0.27694637,0.2258755,0.24279833,4.99975e-05,0.0006499675,2.1143138
+"2D x 3D multiplicative (2.0x sigma, recomputed) - Proposed confidence-guided fusion (saved raw)",0.2338777,0.27661124,0.22534025,0.24245937,4.99975e-05,0.0006499675,2.0933361
