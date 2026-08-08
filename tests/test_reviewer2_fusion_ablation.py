@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from reviewer2_fusion_ablation import (
+from docs.reviewer2_fusion_ablation.reviewer2_fusion_ablation import (
     bootstrap_ci,
     holm_adjust,
     paired_effect_size_dz,

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from paper_resubmission_20260728.evaluate_large_unity_benchmark import (
+from paper_array_20260730.array_submission.scripts.unity.evaluate_large_unity_benchmark import (
     ALIGN_ROOT_POS,
     CANONICAL_LEFT_HIP_POS,
     CANONICAL_LEFT_SHOULDER_POS,

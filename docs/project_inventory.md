@@ -19,7 +19,6 @@ core pipeline
   vis_3d_kpt/             fused 3D skeleton visualization
 
 paper packages
-  paper_resubmission_20260728/
   paper_array_20260730/
   archive/paper_packages/paper_ieee_access_20260729/
   archive/paper_packages/paper_sport_engineering/
@@ -60,7 +59,6 @@ work.
 
 | Path | Role | Current status |
 | --- | --- | --- |
-| `paper_resubmission_20260728/` | Main manuscript package with Unity benchmark, robustness, supervised baselines, real-world metrics, tables, and PDF. | Keep if this remains the authoritative resubmission package. |
 | `paper_array_20260730/` | Elsevier Array-format submission package with flattened figures/tables and copied scripts. | Keep if Array is the target venue package. |
 | `archive/paper_packages/paper_ieee_access_20260729/` | IEEE Access-format package. | Archived from the top level; keep here unless actively submitting to IEEE Access. |
 | `archive/paper_packages/paper_sport_engineering/` | Sports Engineering-style manuscript and figures. | Archived from the top level; keep here unless actively revising this venue version. |
@@ -102,7 +100,6 @@ For a cleaner repo, use this target shape over time:
 configs/
 docs/
 paper/
-  resubmission_20260728/
   array_20260730/
   archive/
 src/
