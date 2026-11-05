@@ -20,8 +20,6 @@ core pipeline
 
 paper packages
   paper/paper_array_20260730/
-  paper/paper_ieee_access_20260729/
-  paper/paper_sport_engineering/
   reviewer2_fusion_ablation.py
   docs/reviewer2_fusion_ablation/
 
@@ -60,8 +58,6 @@ work.
 | Path | Role | Current status |
 | --- | --- | --- |
 | `paper/paper_array_20260730/` | Elsevier Array-format submission package with flattened figures/tables and copied scripts. | Keep if Array is the target venue package. |
-| `paper/paper_ieee_access_20260729/` | IEEE Access-format package. | Not the active venue; keep here unless actively submitting to IEEE Access. |
-| `paper/paper_sport_engineering/` | Sports Engineering-style manuscript and figures. | Not the active venue; keep here unless actively revising this venue version. |
 | `reviewer2_fusion_ablation.py` | Standalone reviewer-response ablation/statistics script using `fuse.confidence`. | Keep near paper scripts or move under a paper package after updating imports/tests. |
 | `docs/reviewer2_fusion_ablation/` | Generated ablation CSV and markdown report. | Keep as evidence if tied to reviewer response; otherwise archive with the relevant paper package. |
 
@@ -125,6 +121,8 @@ the LaTeX packages and tests currently use direct relative paths.
 - Added `paper_*/` and `archive/paper_packages/` to `.gitignore` so paper packages are local artifacts by default.
 - 2026-11-05: Moved `paper_array_20260730/` and both `archive/paper_packages/` packages into `paper/`, and added `/paper/` to `.gitignore`.
 - Updated the paper-package tests and the benchmark scripts' `PROJECT_ROOT` to the `paper/` paths.
+- 2026-11-05: Deleted the IEEE Access and Sports Engineering packages; `paper/` now holds only `paper_array_20260730/`.
+- Pointed the extrinsic-perturbation test at the Array copy of the robustness script, and kept `generate_turn_phase_analysis.py` under the Array package's `scripts/realworld/`.
 
 ## Blocked Moves
 
