@@ -23,6 +23,7 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
+import argparse
 import csv
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -1221,8 +1222,24 @@ def visualize_3d_keypoints(
 
 
 def main():
-    input_path = Path("/workspace/data/dual_view_pose/fused_smoothed_results")
-    output_dir = Path("/workspace/data/dual_view_pose/angle_outputs")
+    parser = argparse.ArgumentParser(
+        description="Evaluate skiing angles for every fused npy sequence."
+    )
+    parser.add_argument(
+        "--input-root",
+        type=Path,
+        default=Path("/workspace/data/dual_view_pose/fused_smoothed_results"),
+        help="Root folder containing fused/smoothed npy sequences.",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path("/workspace/data/dual_view_pose/angle_outputs"),
+        help="Output folder for angle reports.",
+    )
+    args = parser.parse_args()
+    input_path = args.input_root
+    output_dir = args.output_root
 
     def _person_and_variant(stem: str) -> Tuple[str, str]:
         if stem.endswith("_smoothed"):

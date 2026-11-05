@@ -100,7 +100,9 @@ python -m fuse.main_raw \
 Run angle analysis:
 
 ```bash
-python -m angle.main
+python -m angle.main \
+  --input-root /workspace/data/dual_view_pose/fused_smoothed_results \
+  --output-root /workspace/data/dual_view_pose/angle_outputs
 ```
 
 ## Configuration

@@ -14,6 +14,7 @@ from paper.paper_array_20260730.array_submission.scripts.unity.evaluate_large_un
     OLD_DATA_PREFIX,
     camera_pair_features,
     ema_sequence,
+    entry_to_pair,
     normalize_camera_id,
     project_points,
     rebase_path,
@@ -32,6 +33,22 @@ class LargeUnityBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             rebased,
             LOCAL_DATA_PREFIX / "skiing_unity_dataset/data_pole_ski/female/action/meta/sequence.json",
+        )
+
+    def test_entry_to_pair_rebases_under_given_data_prefix(self):
+        entry = {
+            "person_id": "female",
+            "action_id": "action",
+            "sequence_meta_path": str(OLD_DATA_PREFIX / "skiing_unity_dataset/data_pole_ski/female/action/meta/sequence.json"),
+            "cam1_id": "capture_L0_A000",
+            "cam2_id": "capture_L1_A020",
+        }
+
+        record = entry_to_pair(entry, Path("/data/elsewhere"))
+
+        self.assertEqual(
+            record.action_dir,
+            Path("/data/elsewhere/skiing_unity_dataset/data_pole_ski/female/action"),
         )
 
     def test_camera_pair_features_uses_wrapped_angle_delta(self):
