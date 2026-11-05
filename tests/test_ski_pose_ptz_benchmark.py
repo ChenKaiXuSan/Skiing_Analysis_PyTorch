@@ -8,7 +8,7 @@ import numpy as np
 
 SCRIPT = (
     Path(__file__).resolve().parents[1]
-    / "paper_array_20260730/array_submission/scripts/ski_pose_ptz/evaluate_ski_pose_ptz_benchmark.py"
+    / "paper/paper_array_20260730/array_submission/scripts/ski_pose_ptz/evaluate_ski_pose_ptz_benchmark.py"
 )
 spec = importlib.util.spec_from_file_location("ski_pose_ptz_benchmark", SCRIPT)
 ptz = importlib.util.module_from_spec(spec)

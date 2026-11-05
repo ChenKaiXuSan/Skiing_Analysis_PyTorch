@@ -8,7 +8,7 @@ import numpy as np
 
 SCRIPT_DIR = (
     Path(__file__).resolve().parents[1]
-    / "archive/paper_packages/paper_ieee_access_20260729/ieeeaccess_submission/scripts"
+    / "paper/paper_ieee_access_20260729/ieeeaccess_submission/scripts"
 )
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))

@@ -133,5 +133,6 @@ ckpt/
 chessboard/
 
 # Paper submission packages are local artifacts by default.
+/paper/
 paper_*/
 archive/paper_packages/
